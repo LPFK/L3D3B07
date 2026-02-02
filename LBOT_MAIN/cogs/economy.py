@@ -26,7 +26,7 @@ class Economy(commands.Cog):
     
     async def cog_load(self):
         self.voice_money_task.start()
-    l
+    
     async def cog_unload(self):
         self.voice_money_task.cancel()
     

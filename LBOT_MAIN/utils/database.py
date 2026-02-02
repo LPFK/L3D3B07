@@ -68,6 +68,8 @@ class Database:
                 birthdays_enabled INTEGER DEFAULT 0,
                 temp_voice_enabled INTEGER DEFAULT 0,
                 invites_enabled INTEGER DEFAULT 0,
+                releases_enabled INTEGER DEFAULT 0,
+                gamedeals_enabled INTEGER DEFAULT 0,
                 
                 -- General settings stored as JSON
                 settings_json TEXT DEFAULT '{}'
@@ -532,6 +534,87 @@ class Database:
             )
         """)
         
+        # ==================== RELEASES (Games/Anime/Series/Films) ====================
+        await self.execute("""
+            CREATE TABLE IF NOT EXISTS releases_config (
+                guild_id INTEGER PRIMARY KEY,
+                games_channel_id INTEGER,
+                games_role_id INTEGER,
+                anime_channel_id INTEGER,
+                anime_role_id INTEGER,
+                series_channel_id INTEGER,
+                series_role_id INTEGER,
+                films_channel_id INTEGER,
+                films_role_id INTEGER
+            )
+        """)
+        
+        await self.execute("""
+            CREATE TABLE IF NOT EXISTS announced_releases (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER,
+                category TEXT,
+                item_id TEXT,
+                announced_at REAL,
+                UNIQUE(guild_id, category, item_id)
+            )
+        """)
+        
+        # ==================== GAME DEALS (Epic/Steam) ====================
+        await self.execute("""
+            CREATE TABLE IF NOT EXISTS gamedeals_config (
+                guild_id INTEGER PRIMARY KEY,
+                epic_channel_id INTEGER,
+                epic_role_id INTEGER,
+                steam_channel_id INTEGER,
+                steam_role_id INTEGER,
+                steam_min_discount INTEGER DEFAULT 75
+            )
+        """)
+        
+        await self.execute("""
+            CREATE TABLE IF NOT EXISTS announced_deals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER,
+                deal_id TEXT,
+                platform TEXT,
+                announced_at REAL,
+                UNIQUE(guild_id, deal_id)
+            )
+        """)
+        
+        # ==================== AUTO MESSAGES ====================
+        await self.execute("""
+            CREATE TABLE IF NOT EXISTS auto_messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                guild_id INTEGER,
+                channel_id INTEGER,
+                content TEXT,
+                embed_json TEXT,
+                interval INTEGER,
+                next_run REAL,
+                last_run REAL,
+                created_at REAL,
+                enabled INTEGER DEFAULT 1,
+                mention_role_id INTEGER
+            )
+        """)
+        
+        # ==================== BUMP REMINDERS ====================
+        await self.execute("""
+            CREATE TABLE IF NOT EXISTS bump_config (
+                guild_id INTEGER PRIMARY KEY,
+                enabled INTEGER DEFAULT 0,
+                channel_id INTEGER,
+                role_id INTEGER,
+                cooldown INTEGER DEFAULT 7200,
+                message TEXT,
+                thank_message TEXT,
+                last_bump REAL DEFAULT 0,
+                last_reminder REAL DEFAULT 0
+            )
+        """)
+        
         # Create indexes for performance
         await self.execute("CREATE INDEX IF NOT EXISTS idx_user_levels_guild ON user_levels(guild_id)")
         await self.execute("CREATE INDEX IF NOT EXISTS idx_user_levels_xp ON user_levels(guild_id, xp DESC)")
@@ -540,6 +623,9 @@ class Database:
         await self.execute("CREATE INDEX IF NOT EXISTS idx_mod_cases_user ON mod_cases(guild_id, user_id)")
         await self.execute("CREATE INDEX IF NOT EXISTS idx_user_invites_guild ON user_invites(guild_id)")
         await self.execute("CREATE INDEX IF NOT EXISTS idx_invited_users_inviter ON invited_users(guild_id, inviter_id)")
+        await self.execute("CREATE INDEX IF NOT EXISTS idx_auto_messages_next ON auto_messages(next_run)")
+        await self.execute("CREATE INDEX IF NOT EXISTS idx_announced_releases ON announced_releases(guild_id, category)")
+        await self.execute("CREATE INDEX IF NOT EXISTS idx_announced_deals ON announced_deals(guild_id, platform)")
 
 
 # Singleton instance
