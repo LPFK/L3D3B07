@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ guild.name }} — Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <!-- Toast container -->
+    <div id="toast-container"></div>
+
+    <!-- Topbar -->
+    <nav class="topbar">
+        <div class="topbar-brand">
+            <a href="{{ url_for('servers') }}" class="back-link">←</a>
+            🤖 {{ guild.name }}
+        </div>
+        <div class="topbar-user">
+            <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png?size=32"
+                 alt="" class="avatar-small" onerror="this.style.display='none'">
+            <span>{{ user.global_name or user.username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">Déconnexion</a>
+        </div>
+    </nav>
+
+    <div class="dashboard-layout">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-section">
+                <div class="sidebar-label">Général</div>
+                <a class="sidebar-link active" data-tab="overview">📊 Vue d'ensemble</a>
+                <a class="sidebar-link" data-tab="modules">⚙️ Modules</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Configuration</div>
+                <a class="sidebar-link" data-tab="levels">📈 Niveaux</a>
+                <a class="sidebar-link" data-tab="economy">💰 Économie</a>
+                <a class="sidebar-link" data-tab="moderation">🛡️ Modération</a>
+                <a class="sidebar-link" data-tab="welcome">👋 Bienvenue</a>
+                <a class="sidebar-link" data-tab="starboard">⭐ Starboard</a>
+                <a class="sidebar-link" data-tab="birthdays">🎂 Anniversaires</a>
+                <a class="sidebar-link" data-tab="invites">📨 Invitations</a>
+            </div>
+            <div class="sidebar-section">
+                <div class="sidebar-label">Automatisations</div>
+                <a class="sidebar-link" data-tab="automessages">📩 Messages auto</a>
+                <a class="sidebar-link" data-tab="bump">📢 Bump</a>
+                <a class="sidebar-link" data-tab="releases">🎬 Sorties médias</a>
+                <a class="sidebar-link" data-tab="gamedeals">🎮 Deals / Gratuits</a>
+            </div>
+        </aside>
+
+        <!-- Content -->
+        <main class="dashboard-content">
+
+            <!-- ==================== OVERVIEW ==================== -->
+            <section id="tab-overview" class="tab-content active">
+                <h2>📊 Vue d'ensemble</h2>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">{{ stats.members_tracked.c }}</div>
+                        <div class="stat-label">Membres suivis</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{{ stats.mod_cases.c }}</div>
+                        <div class="stat-label">Cas de modération</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{{ stats.giveaways_active.c }}</div>
+                        <div class="stat-label">Giveaways actifs</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">{{ stats.tickets_open.c }}</div>
+                        <div class="stat-label">Tickets ouverts</div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Préfixe du bot</h3>
+                    <div class="form-row">
+                        <input type="text" id="prefix" value="{{ settings.prefix }}" class="form-input" maxlength="5" style="width:80px">
+                        <button onclick="saveSettings({prefix: document.getElementById('prefix').value})" class="btn btn-primary">Sauvegarder</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== MODULES ==================== -->
+            <section id="tab-modules" class="tab-content">
+                <h2>⚙️ Modules</h2>
+                <p class="text-muted">Active ou désactive les fonctionnalités du bot.</p>
+                <div class="modules-grid">
+                    {% set modules = [
+                        ("levels_enabled", "📈 Niveaux", "Système d'XP et de niveaux"),
+                        ("economy_enabled", "💰 Économie", "Monnaie virtuelle et boutique"),
+                        ("moderation_enabled", "🛡️ Modération", "Outils de modération et automod"),
+                        ("welcome_enabled", "👋 Bienvenue", "Messages de bienvenue et départ"),
+                        ("tickets_enabled", "🎫 Tickets", "Système de support par tickets"),
+                        ("starboard_enabled", "⭐ Starboard", "Mise en avant des messages populaires"),
+                        ("birthdays_enabled", "🎂 Anniversaires", "Annonces d'anniversaires"),
+                        ("invites_enabled", "📨 Invitations", "Suivi des invitations"),
+                        ("releases_enabled", "🎬 Sorties", "Annonces de sorties médias"),
+                        ("gamedeals_enabled", "🎮 Deals", "Jeux gratuits et promotions"),
+                    ] %}
+                    {% for key, label, desc in modules %}
+                    <div class="module-card">
+                        <div class="module-info">
+                            <h4>{{ label }}</h4>
+                            <p>{{ desc }}</p>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" {{ 'checked' if settings[key] else '' }}
+                                   onchange="saveSettings({'{{ key }}': this.checked ? 1 : 0})">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <!-- ==================== LEVELS ==================== -->
+            <section id="tab-levels" class="tab-content">
+                <h2>📈 Configuration des niveaux</h2>
+                {% set lc = configs.levels or {} %}
+                <div class="card">
+                    <h3>Paramètres XP</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>XP par message</label>
+                            <input type="number" id="lv-xp-msg" value="{{ lc.xp_per_message or 15 }}" class="form-input" min="1" max="100">
+                        </div>
+                        <div class="form-group">
+                            <label>Cooldown (sec)</label>
+                            <input type="number" id="lv-cooldown" value="{{ lc.xp_cooldown or 60 }}" class="form-input" min="10">
+                        </div>
+                        <div class="form-group">
+                            <label>XP vocal / min</label>
+                            <input type="number" id="lv-xp-voice" value="{{ lc.xp_voice_per_minute or 5 }}" class="form-input" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Niveau max (0 = illimité)</label>
+                            <input type="number" id="lv-max" value="{{ lc.max_level or 0 }}" class="form-input" min="0">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Salon d'annonce level-up</label>
+                        <select id="lv-channel" class="form-select">
+                            <option value="">Même salon que le message</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == lc.level_up_channel_id|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Message de level-up</label>
+                        <input type="text" id="lv-msg" value="{{ lc.level_up_message or '' }}" class="form-input" placeholder="Félicitations {user} ! Niveau {level} !">
+                    </div>
+                    <button onclick="saveModuleConfig('levels', {
+                        xp_per_message: +$('#lv-xp-msg').value,
+                        xp_cooldown: +$('#lv-cooldown').value,
+                        xp_voice_per_minute: +$('#lv-xp-voice').value,
+                        max_level: +$('#lv-max').value,
+                        level_up_channel_id: $('#lv-channel').value || null,
+                        level_up_message: $('#lv-msg').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+
+                <div class="card">
+                    <h3>Récompenses de niveau</h3>
+                    <table class="data-table">
+                        <thead><tr><th>Niveau</th><th>Rôle</th><th></th></tr></thead>
+                        <tbody>
+                            {% for r in level_rewards %}
+                            <tr>
+                                <td>{{ r.level }}</td>
+                                <td>{{ r.role_id }}</td>
+                                <td><button onclick="deleteLevelReward({{ r.id }})" class="btn btn-sm btn-danger">✕</button></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    <div class="form-row" style="margin-top:12px">
+                        <input type="number" id="lr-level" placeholder="Niveau" class="form-input" style="width:100px" min="1">
+                        <select id="lr-role" class="form-select">
+                            <option value="">-- Rôle --</option>
+                            {% for r in roles %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+                        </select>
+                        <button onclick="addLevelReward()" class="btn btn-primary">Ajouter</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== ECONOMY ==================== -->
+            <section id="tab-economy" class="tab-content">
+                <h2>💰 Configuration de l'économie</h2>
+                {% set ec = configs.economy or {} %}
+                <div class="card">
+                    <h3>Paramètres</h3>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Nom de la monnaie</label>
+                            <input type="text" id="eco-name" value="{{ ec.currency_name or 'coins' }}" class="form-input">
+                        </div>
+                        <div class="form-group">
+                            <label>Emoji</label>
+                            <input type="text" id="eco-emoji" value="{{ ec.currency_emoji or '💰' }}" class="form-input" style="width:80px">
+                        </div>
+                        <div class="form-group">
+                            <label>Récompense daily</label>
+                            <input type="number" id="eco-daily" value="{{ ec.daily_amount or 100 }}" class="form-input" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Work min</label>
+                            <input type="number" id="eco-wmin" value="{{ ec.work_min or 50 }}" class="form-input" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Work max</label>
+                            <input type="number" id="eco-wmax" value="{{ ec.work_max or 200 }}" class="form-input" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Cooldown work (sec)</label>
+                            <input type="number" id="eco-wcd" value="{{ ec.work_cooldown or 3600 }}" class="form-input" min="60">
+                        </div>
+                    </div>
+                    <button onclick="saveModuleConfig('economy', {
+                        currency_name: $('#eco-name').value,
+                        currency_emoji: $('#eco-emoji').value,
+                        daily_amount: +$('#eco-daily').value,
+                        work_min: +$('#eco-wmin').value,
+                        work_max: +$('#eco-wmax').value,
+                        work_cooldown: +$('#eco-wcd').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+
+                <div class="card">
+                    <h3>Boutique</h3>
+                    <table class="data-table">
+                        <thead><tr><th>Article</th><th>Prix</th><th>Rôle</th><th></th></tr></thead>
+                        <tbody>
+                            {% for item in shop_items %}
+                            <tr>
+                                <td>{{ item.name }}</td>
+                                <td>{{ item.price }}</td>
+                                <td>{{ item.role_id or '-' }}</td>
+                                <td><button onclick="deleteShopItem({{ item.id }})" class="btn btn-sm btn-danger">✕</button></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                    <div class="form-row" style="margin-top:12px">
+                        <input type="text" id="si-name" placeholder="Nom" class="form-input" style="width:150px">
+                        <input type="number" id="si-price" placeholder="Prix" class="form-input" style="width:100px" min="1">
+                        <select id="si-role" class="form-select">
+                            <option value="">-- Rôle (optionnel) --</option>
+                            {% for r in roles %}<option value="{{ r.id }}">{{ r.name }}</option>{% endfor %}
+                        </select>
+                        <button onclick="addShopItem()" class="btn btn-primary">Ajouter</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ==================== MODERATION ==================== -->
+            <section id="tab-moderation" class="tab-content">
+                <h2>🛡️ Configuration de la modération</h2>
+                {% set mc = configs.mod or {} %}
+                <div class="card">
+                    <h3>Paramètres</h3>
+                    <div class="form-group">
+                        <label>Salon des logs de modération</label>
+                        <select id="mod-log" class="form-select">
+                            <option value="">Désactivé</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == mc.mod_log_channel_id|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Seuil d'avertissements</label>
+                            <input type="number" id="mod-warn" value="{{ mc.warn_threshold or 3 }}" class="form-input" min="1">
+                        </div>
+                        <div class="form-group">
+                            <label>Action au seuil</label>
+                            <select id="mod-action" class="form-select">
+                                <option value="mute" {{ 'selected' if mc.warn_action == 'mute' else '' }}>Mute</option>
+                                <option value="kick" {{ 'selected' if mc.warn_action == 'kick' else '' }}>Kick</option>
+                                <option value="ban" {{ 'selected' if mc.warn_action == 'ban' else '' }}>Ban</option>
+                            </select>
+                        </div>
+                    </div>
+                    <h4 style="margin-top:20px">Automod</h4>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Anti-spam (messages/5sec, 0=off)</label>
+                            <input type="number" id="mod-spam" value="{{ mc.anti_spam or 0 }}" class="form-input" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label>Anti-invitations</label>
+                            <select id="mod-invite" class="form-select">
+                                <option value="0" {{ 'selected' if not mc.anti_invite else '' }}>Désactivé</option>
+                                <option value="1" {{ 'selected' if mc.anti_invite else '' }}>Activé</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Anti-liens</label>
+                            <select id="mod-links" class="form-select">
+                                <option value="0" {{ 'selected' if not mc.anti_links else '' }}>Désactivé</option>
+                                <option value="1" {{ 'selected' if mc.anti_links else '' }}>Activé</option>
+                            </select>
+                        </div>
+                    </div>
+                    <button onclick="saveModuleConfig('moderation', {
+                        mod_log_channel_id: $('#mod-log').value || null,
+                        warn_threshold: +$('#mod-warn').value,
+                        warn_action: $('#mod-action').value,
+                        anti_spam: +$('#mod-spam').value,
+                        anti_invite: +$('#mod-invite').value,
+                        anti_links: +$('#mod-links').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== WELCOME ==================== -->
+            <section id="tab-welcome" class="tab-content">
+                <h2>👋 Configuration de bienvenue</h2>
+                {% set wc = configs.welcome or {} %}
+                <div class="card">
+                    <h3>Messages de bienvenue</h3>
+                    <div class="form-group">
+                        <label>Salon de bienvenue</label>
+                        <select id="wel-channel" class="form-select">
+                            <option value="">Désactivé</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == wc.welcome_channel_id|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Message de bienvenue <small class="text-muted">({user}, {server}, {count})</small></label>
+                        <textarea id="wel-msg" class="form-input" rows="3">{{ wc.welcome_message or 'Bienvenue {user} sur **{server}** ! 🎉' }}</textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>Salon de départ</label>
+                        <select id="wel-bye-channel" class="form-select">
+                            <option value="">Désactivé</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == wc.goodbye_channel_id|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Message de départ</label>
+                        <textarea id="wel-bye-msg" class="form-input" rows="2">{{ wc.goodbye_message or 'Au revoir {user} ! 👋' }}</textarea>
+                    </div>
+                    <button onclick="saveModuleConfig('welcome', {
+                        welcome_channel_id: $('#wel-channel').value || null,
+                        welcome_message: $('#wel-msg').value,
+                        goodbye_channel_id: $('#wel-bye-channel').value || null,
+                        goodbye_message: $('#wel-bye-msg').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== STARBOARD ==================== -->
+            <section id="tab-starboard" class="tab-content">
+                <h2>⭐ Configuration du Starboard</h2>
+                {% set sb = configs.starboard or {} %}
+                <div class="card">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Salon du starboard</label>
+                            <select id="sb-channel" class="form-select">
+                                <option value="">Non configuré</option>
+                                {% for c in channels %}
+                                <option value="{{ c.id }}" {{ 'selected' if c.id|string == sb.channel_id|string else '' }}>#{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Emoji</label>
+                            <input type="text" id="sb-emoji" value="{{ sb.emoji or '⭐' }}" class="form-input" style="width:80px">
+                        </div>
+                        <div class="form-group">
+                            <label>Seuil (réactions minimum)</label>
+                            <input type="number" id="sb-threshold" value="{{ sb.threshold or 3 }}" class="form-input" min="1" max="50">
+                        </div>
+                    </div>
+                    <button onclick="saveModuleConfig('starboard', {
+                        channel_id: $('#sb-channel').value || null,
+                        emoji: $('#sb-emoji').value,
+                        threshold: +$('#sb-threshold').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== BIRTHDAYS ==================== -->
+            <section id="tab-birthdays" class="tab-content">
+                <h2>🎂 Configuration des anniversaires</h2>
+                {% set bd = configs.birthday or {} %}
+                <div class="card">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Salon d'annonces</label>
+                            <select id="bd-channel" class="form-select">
+                                <option value="">Non configuré</option>
+                                {% for c in channels %}
+                                <option value="{{ c.id }}" {{ 'selected' if c.id|string == bd.channel_id|string else '' }}>#{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Rôle d'anniversaire</label>
+                            <select id="bd-role" class="form-select">
+                                <option value="">Aucun</option>
+                                {% for r in roles %}<option value="{{ r.id }}" {{ 'selected' if r.id|string == bd.role_id|string else '' }}>{{ r.name }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Heure d'annonce (0-23)</label>
+                            <input type="number" id="bd-hour" value="{{ bd.announce_hour or 9 }}" class="form-input" min="0" max="23">
+                        </div>
+                    </div>
+                    <button onclick="saveModuleConfig('birthdays', {
+                        channel_id: $('#bd-channel').value || null,
+                        role_id: $('#bd-role').value || null,
+                        announce_hour: +$('#bd-hour').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== INVITES ==================== -->
+            <section id="tab-invites" class="tab-content">
+                <h2>📨 Configuration des invitations</h2>
+                {% set ic = configs.invite or {} %}
+                <div class="card">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Salon des arrivées</label>
+                            <select id="inv-join" class="form-select">
+                                <option value="">Désactivé</option>
+                                {% for c in channels %}
+                                <option value="{{ c.id }}" {{ 'selected' if c.id|string == ic.join_channel_id|string else '' }}>#{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Salon des départs</label>
+                            <select id="inv-leave" class="form-select">
+                                <option value="">Désactivé</option>
+                                {% for c in channels %}
+                                <option value="{{ c.id }}" {{ 'selected' if c.id|string == ic.leave_channel_id|string else '' }}>#{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Âge min. compte (jours)</label>
+                            <input type="number" id="inv-age" value="{{ ic.min_account_age or 7 }}" class="form-input" min="0">
+                        </div>
+                    </div>
+                    <button onclick="saveModuleConfig('invites', {
+                        join_channel_id: $('#inv-join').value || null,
+                        leave_channel_id: $('#inv-leave').value || null,
+                        min_account_age: +$('#inv-age').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== AUTO MESSAGES ==================== -->
+            <section id="tab-automessages" class="tab-content">
+                <h2>📩 Messages automatiques</h2>
+                <div class="card">
+                    <h3>Messages actifs</h3>
+                    <div id="automsg-list">
+                        {% for msg in auto_messages %}
+                        <div class="automsg-item" id="automsg-{{ msg.id }}">
+                            <div class="automsg-info">
+                                <span class="badge {{ 'badge-success' if msg.enabled else 'badge-muted' }}">
+                                    {{ 'Actif' if msg.enabled else 'Inactif' }}
+                                </span>
+                                <strong>#{{ msg.channel_id }}</strong>
+                                <span class="text-muted">— toutes les {{ (msg.interval // 3600) }}h{{ '%02d' % ((msg.interval % 3600) // 60) }}</span>
+                            </div>
+                            <div class="automsg-content">{{ msg.content[:100] }}{{ '...' if msg.content|length > 100 else '' }}</div>
+                            <div class="automsg-actions">
+                                <button onclick="toggleAutoMsg({{ msg.id }})" class="btn btn-sm btn-outline">
+                                    {{ 'Désactiver' if msg.enabled else 'Activer' }}
+                                </button>
+                                <button onclick="deleteAutoMsg({{ msg.id }})" class="btn btn-sm btn-danger">Supprimer</button>
+                            </div>
+                        </div>
+                        {% endfor %}
+                        {% if not auto_messages %}
+                        <p class="text-muted">Aucun message automatique configuré.</p>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3>Nouveau message</h3>
+                    <div class="form-group">
+                        <label>Salon</label>
+                        <select id="am-channel" class="form-select">
+                            {% for c in channels %}<option value="{{ c.id }}">#{{ c.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Intervalle</label>
+                        <div class="form-row">
+                            <input type="number" id="am-hours" placeholder="Heures" class="form-input" style="width:100px" min="0" value="2">
+                            <span>h</span>
+                            <input type="number" id="am-mins" placeholder="Minutes" class="form-input" style="width:100px" min="0" max="59" value="0">
+                            <span>min</span>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Message</label>
+                        <textarea id="am-content" class="form-input" rows="3" placeholder="N'oubliez pas de bump le serveur ! 🔔"></textarea>
+                    </div>
+                    <button onclick="addAutoMsg()" class="btn btn-primary">Créer</button>
+                </div>
+            </section>
+
+            <!-- ==================== BUMP ==================== -->
+            <section id="tab-bump" class="tab-content">
+                <h2>📢 Rappels de Bump</h2>
+                {% set bp = configs.bump or {} %}
+                <div class="card">
+                    <div class="module-card" style="margin-bottom:20px">
+                        <div class="module-info">
+                            <h4>Rappels de bump</h4>
+                            <p>Rappelle automatiquement aux membres de bump le serveur</p>
+                        </div>
+                        <label class="toggle">
+                            <input type="checkbox" id="bump-enabled" {{ 'checked' if bp.enabled else '' }}
+                                   onchange="saveModuleConfig('bump', {enabled: this.checked ? 1 : 0})">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label>Salon des rappels</label>
+                            <select id="bump-channel" class="form-select">
+                                <option value="">Non configuré</option>
+                                {% for c in channels %}
+                                <option value="{{ c.id }}" {{ 'selected' if c.id|string == bp.channel_id|string else '' }}>#{{ c.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Rôle à mentionner</label>
+                            <select id="bump-role" class="form-select">
+                                <option value="">Aucun</option>
+                                {% for r in roles %}<option value="{{ r.id }}" {{ 'selected' if r.id|string == bp.role_id|string else '' }}>{{ r.name }}</option>{% endfor %}
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>Cooldown (secondes)</label>
+                            <input type="number" id="bump-cd" value="{{ bp.cooldown or 7200 }}" class="form-input" min="1800">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>Message de rappel</label>
+                        <input type="text" id="bump-msg" value="{{ bp.message or '' }}" class="form-input" placeholder="Il est temps de bump !">
+                    </div>
+                    <div class="form-group">
+                        <label>Message de remerciement <small class="text-muted">({user} = mention)</small></label>
+                        <input type="text" id="bump-thank" value="{{ bp.thank_message or '' }}" class="form-input" placeholder="Merci {user} pour le bump !">
+                    </div>
+                    <button onclick="saveModuleConfig('bump', {
+                        channel_id: $('#bump-channel').value || null,
+                        role_id: $('#bump-role').value || null,
+                        cooldown: +$('#bump-cd').value,
+                        message: $('#bump-msg').value,
+                        thank_message: $('#bump-thank').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== RELEASES ==================== -->
+            <section id="tab-releases" class="tab-content">
+                <h2>🎬 Sorties médias</h2>
+                {% set rc = configs.releases or {} %}
+                <div class="card">
+                    <p class="text-muted">Configure les salons d'annonces pour chaque type de média.</p>
+                    {% set media_types = [
+                        ("games", "🎮 Jeux vidéo", "games_channel_id", "games_role_id"),
+                        ("anime", "📺 Anime", "anime_channel_id", "anime_role_id"),
+                        ("series", "📺 Séries", "series_channel_id", "series_role_id"),
+                        ("films", "🎬 Films", "films_channel_id", "films_role_id"),
+                    ] %}
+                    {% for key, label, ch_key, role_key in media_types %}
+                    <h4>{{ label }}</h4>
+                    <div class="form-row" style="margin-bottom:16px">
+                        <select id="rel-{{ key }}-ch" class="form-select">
+                            <option value="">Désactivé</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == rc[ch_key]|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <select id="rel-{{ key }}-role" class="form-select">
+                            <option value="">Aucun rôle</option>
+                            {% for r in roles %}<option value="{{ r.id }}" {{ 'selected' if r.id|string == rc[role_key]|string else '' }}>{{ r.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    {% endfor %}
+                    <button onclick="saveModuleConfig('releases', {
+                        games_channel_id: $('#rel-games-ch').value || null,
+                        games_role_id: $('#rel-games-role').value || null,
+                        anime_channel_id: $('#rel-anime-ch').value || null,
+                        anime_role_id: $('#rel-anime-role').value || null,
+                        series_channel_id: $('#rel-series-ch').value || null,
+                        series_role_id: $('#rel-series-role').value || null,
+                        films_channel_id: $('#rel-films-ch').value || null,
+                        films_role_id: $('#rel-films-role').value || null
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+            <!-- ==================== GAME DEALS ==================== -->
+            <section id="tab-gamedeals" class="tab-content">
+                <h2>🎮 Deals & Jeux gratuits</h2>
+                {% set gd = configs.gamedeals or {} %}
+                <div class="card">
+                    <h4>🟣 Epic Games Store</h4>
+                    <div class="form-row" style="margin-bottom:20px">
+                        <select id="gd-epic-ch" class="form-select">
+                            <option value="">Désactivé</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == gd.epic_channel_id|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <select id="gd-epic-role" class="form-select">
+                            <option value="">Aucun rôle</option>
+                            {% for r in roles %}<option value="{{ r.id }}" {{ 'selected' if r.id|string == gd.epic_role_id|string else '' }}>{{ r.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <h4>🔵 Steam</h4>
+                    <div class="form-row" style="margin-bottom:12px">
+                        <select id="gd-steam-ch" class="form-select">
+                            <option value="">Désactivé</option>
+                            {% for c in channels %}
+                            <option value="{{ c.id }}" {{ 'selected' if c.id|string == gd.steam_channel_id|string else '' }}>#{{ c.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <select id="gd-steam-role" class="form-select">
+                            <option value="">Aucun rôle</option>
+                            {% for r in roles %}<option value="{{ r.id }}" {{ 'selected' if r.id|string == gd.steam_role_id|string else '' }}>{{ r.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Réduction minimum Steam (%)</label>
+                        <input type="number" id="gd-steammin" value="{{ gd.steam_min_discount or 75 }}" class="form-input" min="50" max="100" style="width:100px">
+                    </div>
+                    <button onclick="saveModuleConfig('gamedeals', {
+                        epic_channel_id: $('#gd-epic-ch').value || null,
+                        epic_role_id: $('#gd-epic-role').value || null,
+                        steam_channel_id: $('#gd-steam-ch').value || null,
+                        steam_role_id: $('#gd-steam-role').value || null,
+                        steam_min_discount: +$('#gd-steammin').value
+                    })" class="btn btn-primary">Sauvegarder</button>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <script>
+    // ==================== UTILS ====================
+    const GUILD_ID = {{ guild_id }};
+    const $ = (sel) => document.querySelector(sel);
+    const $$ = (sel) => document.querySelectorAll(sel);
+
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toast-container');
+        const toast = document.createElement('div');
+        toast.className = `toast toast-${type}`;
+        toast.textContent = message;
+        container.appendChild(toast);
+        setTimeout(() => toast.classList.add('show'), 10);
+        setTimeout(() => {
+            toast.classList.remove('show');
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    async function apiCall(url, method = 'POST', data = null) {
+        try {
+            const opts = {method, headers: {'Content-Type': 'application/json'}};
+            if (data) opts.body = JSON.stringify(data);
+            const resp = await fetch(url, opts);
+            const json = await resp.json();
+            if (json.success) {
+                showToast('Sauvegardé ✓');
+            } else {
+                showToast(json.error || 'Erreur', 'error');
+            }
+            return json;
+        } catch (e) {
+            showToast('Erreur de connexion', 'error');
+        }
+    }
+
+    // ==================== TABS ====================
+    $$('.sidebar-link').forEach(link => {
+        link.addEventListener('click', () => {
+            $$('.sidebar-link').forEach(l => l.classList.remove('active'));
+            $$('.tab-content').forEach(t => t.classList.remove('active'));
+            link.classList.add('active');
+            document.getElementById('tab-' + link.dataset.tab).classList.add('active');
+        });
+    });
+
+    // ==================== API CALLS ====================
+    function saveSettings(data) {
+        apiCall(`/api/${GUILD_ID}/settings`, 'POST', data);
+    }
+
+    function saveModuleConfig(module, data) {
+        apiCall(`/api/${GUILD_ID}/config/${module}`, 'POST', data);
+    }
+
+    // Auto messages
+    async function addAutoMsg() {
+        const hours = +$('#am-hours').value || 0;
+        const mins = +$('#am-mins').value || 0;
+        const interval = hours * 3600 + mins * 60;
+        await apiCall(`/api/${GUILD_ID}/automessages`, 'POST', {
+            channel_id: $('#am-channel').value,
+            interval: interval,
+            content: $('#am-content').value
+        });
+        location.reload();
+    }
+
+    async function deleteAutoMsg(id) {
+        if (!confirm('Supprimer ce message ?')) return;
+        await apiCall(`/api/${GUILD_ID}/automessages/${id}`, 'DELETE');
+        document.getElementById('automsg-' + id)?.remove();
+    }
+
+    async function toggleAutoMsg(id) {
+        await apiCall(`/api/${GUILD_ID}/automessages/${id}/toggle`, 'POST');
+        location.reload();
+    }
+
+    // Level rewards
+    async function addLevelReward() {
+        await apiCall(`/api/${GUILD_ID}/levelrewards`, 'POST', {
+            level: +$('#lr-level').value,
+            role_id: $('#lr-role').value
+        });
+        location.reload();
+    }
+
+    async function deleteLevelReward(id) {
+        await apiCall(`/api/${GUILD_ID}/levelrewards/${id}`, 'DELETE');
+        location.reload();
+    }
+
+    // Shop items
+    async function addShopItem() {
+        await apiCall(`/api/${GUILD_ID}/shopitems`, 'POST', {
+            name: $('#si-name').value,
+            price: +$('#si-price').value,
+            role_id: $('#si-role').value || null
+        });
+        location.reload();
+    }
+
+    async function deleteShopItem(id) {
+        if (!confirm('Supprimer cet article ?')) return;
+        await apiCall(`/api/${GUILD_ID}/shopitems/${id}`, 'DELETE');
+        location.reload();
+    }
+
+    // Deep link: check URL hash
+    const hash = window.location.hash.slice(1);
+    if (hash) {
+        const link = document.querySelector(`[data-tab="${hash}"]`);
+        if (link) link.click();
+    }
+    </script>
+</body>
+</html>

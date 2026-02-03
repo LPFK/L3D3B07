@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sélection du serveur — Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="topbar">
+        <div class="topbar-brand">🤖 DraftBot Clone</div>
+        <div class="topbar-user">
+            <img src="https://cdn.discordapp.com/avatars/{{ user.id }}/{{ user.avatar }}.png?size=32"
+                 alt="" class="avatar-small" onerror="this.style.display='none'">
+            <span>{{ user.global_name or user.username }}</span>
+            <a href="{{ url_for('logout') }}" class="btn btn-sm btn-outline">Déconnexion</a>
+        </div>
+    </nav>
+
+    <main class="servers-page">
+        <h1>Choisis un serveur</h1>
+        <p class="text-muted">Sélectionne le serveur que tu veux configurer.</p>
+
+        <div class="server-grid">
+            {% for guild in guilds %}
+            <div class="server-card {{ 'server-active' if guild.bot_in_server else 'server-inactive' }}">
+                {% if guild.icon_url %}
+                <img src="{{ guild.icon_url }}?size=128" alt="" class="server-icon">
+                {% else %}
+                <div class="server-icon server-icon-placeholder">
+                    {{ guild.name[:2].upper() }}
+                </div>
+                {% endif %}
+
+                <h3>{{ guild.name }}</h3>
+
+                {% if guild.bot_in_server %}
+                <a href="{{ url_for('dashboard', guild_id=guild.id) }}" class="btn btn-primary btn-block">
+                    Configurer
+                </a>
+                {% else %}
+                <a href="https://discord.com/oauth2/authorize?client_id={{ config.get('DISCORD_CLIENT_ID', '') }}&permissions=1642790102134&scope=bot+applications.commands&guild_id={{ guild.id }}"
+                   class="btn btn-outline btn-block" target="_blank">
+                    Inviter le bot
+                </a>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+
+        {% if not guilds %}
+        <div class="empty-state">
+            <p>Aucun serveur trouvé où tu es administrateur.</p>
+        </div>
+        {% endif %}
+    </main>
+</body>
+</html>
