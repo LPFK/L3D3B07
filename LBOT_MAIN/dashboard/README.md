@@ -47,6 +47,8 @@ Interface web de configuration pour le bot Discord, construite avec **Flask** et
 Depuis le dossier `dashboard/` :
 
 ```bash
+python -m venv dashboard (Windows) | python3 -m venv RoR2MM (Linux/Mac)
+dashboard\Scripts\activate (Windows) 
 cd dashboard
 pip install -r requirements.txt
 ```

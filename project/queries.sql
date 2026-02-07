@@ -1,4 +1,4 @@
--- ============================================================
+ON CONF-- ============================================================
 -- queries.sql
 -- Requêtes typiques exécutées sur la base de données du bot
 -- Par Lilian Kozlowski

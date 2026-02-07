@@ -57,11 +57,14 @@ draftbot-clone/
 ### 1. Cloner ou télécharger le projet
 
 ```bash
-git clone https://github.com/ton-user/draftbot-clone.git
-cd draftbot-clone
+git clone https://github.com/LPFK/L3D3B07.git
+cd L3D3BO7
 ```
 
-### 2. Installer les dépendances
+### 2. Installer les dépendances et mettre en place le venv
+
+1. - python -m venv L3D3BOT (Windows) | python3 -m venv RoR2MM (Linux/Mac)
+2. - RoR2MM\Scripts\activate (Windows)
 
 ```bash
 pip install -r requirements.txt

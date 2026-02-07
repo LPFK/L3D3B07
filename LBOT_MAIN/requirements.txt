@@ -17,4 +17,7 @@ humanize>=4.9.0
 feedparser>=6.0.0
 
 # Web
-Flask
+flask>=3.0.0
+flask-session>=0.5.0
+requests>=2.31.0
+

@@ -4,7 +4,7 @@ Par Lilian Kozlowski
 
 ## Présentation vidéo
 
-`TODO` *(optionnel)*
+https://www.youtube.com/watch?v=bKiIQ_j9gqI&feature=youtu.be
 
 ## Objectif
 
