@@ -1,16 +1,18 @@
 """
-Economy Cog - Currency system, shop, daily rewards, work, gambling
+Cog Economy - monnaie, shop, daily, work, gambling
+
+utilise economy_repo pour les acces DB (voir utils/repositories/economy.py)
 """
 
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import time
-import json
 import random
 from typing import Optional
 
 from utils.database import db
+from utils.repositories.economy import economy_repo, UserEconomy
 from utils.helpers import (
     create_embed, success_embed, error_embed, info_embed, warning_embed,
     format_duration, Paginator, ConfirmView, is_admin
@@ -18,7 +20,7 @@ from utils.helpers import (
 
 
 class Economy(commands.Cog):
-    """Système d'économie et de monnaie"""
+    """Systeme d'economie"""
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
@@ -30,50 +32,8 @@ class Economy(commands.Cog):
     async def cog_unload(self):
         self.voice_money_task.cancel()
     
-    async def get_config(self, guild_id: int) -> dict:
-        """Get economy config for a guild"""
-        row = await db.fetchone(
-            "SELECT * FROM economy_config WHERE guild_id = ?", (guild_id,)
-        )
-        if row:
-            return dict(row)
-        
-        await db.execute(
-            "INSERT OR IGNORE INTO economy_config (guild_id) VALUES (?)", (guild_id,)
-        )
-        row = await db.fetchone(
-            "SELECT * FROM economy_config WHERE guild_id = ?", (guild_id,)
-        )
-        return dict(row)
-    
-    async def get_user_data(self, guild_id: int, user_id: int) -> dict:
-        """Get user economy data"""
-        row = await db.fetchone(
-            "SELECT * FROM user_economy WHERE guild_id = ? AND user_id = ?",
-            (guild_id, user_id)
-        )
-        if row:
-            return dict(row)
-        
-        await db.execute(
-            "INSERT OR IGNORE INTO user_economy (guild_id, user_id) VALUES (?, ?)",
-            (guild_id, user_id)
-        )
-        return {
-            "guild_id": guild_id, "user_id": user_id,
-            "balance": 0, "bank": 0, "last_daily": 0, "last_work": 0, "total_earned": 0
-        }
-    
-    async def update_balance(self, guild_id: int, user_id: int, amount: int):
-        """Update user balance"""
-        await db.execute(
-            """UPDATE user_economy SET balance = balance + ?, total_earned = total_earned + ?
-               WHERE guild_id = ? AND user_id = ?""",
-            (amount, max(0, amount), guild_id, user_id)
-        )
-    
     def format_currency(self, amount: int, config: dict) -> str:
-        """Format currency with emoji"""
+        """formate la monnaie avec emoji"""
         emoji = config.get("currency_emoji", "🪙")
         name = config.get("currency_name", "coins")
         return f"{emoji} **{amount:,}** {name}"
@@ -85,7 +45,7 @@ class Economy(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState
     ):
-        """Track voice for money"""
+        """track le vocal pour l'argent"""
         if member.bot:
             return
         
@@ -99,7 +59,7 @@ class Economy(commands.Cog):
     
     @tasks.loop(minutes=1)
     async def voice_money_task(self):
-        """Give money for voice time"""
+        """donne de l'argent pour le temps vocal"""
         for (guild_id, user_id), join_time in list(self.voice_tracking.items()):
             guild = self.bot.get_guild(guild_id)
             if not guild:
@@ -114,12 +74,11 @@ class Economy(commands.Cog):
             if len(voice_members) < 2 or member.voice.self_mute or member.voice.self_deaf:
                 continue
             
-            config = await self.get_config(guild_id)
+            config = await economy_repo.get_config(guild_id)
             money_per_min = config.get("voice_money_per_minute", 1)
             
             if money_per_min > 0:
-                await self.get_user_data(guild_id, user_id)
-                await self.update_balance(guild_id, user_id, money_per_min)
+                await economy_repo.add_balance(guild_id, user_id, money_per_min)
     
     @voice_money_task.before_loop
     async def before_voice_money(self):
@@ -136,8 +95,8 @@ class Economy(commands.Cog):
         if member.bot:
             return await ctx.send(embed=error_embed("Les bots n'ont pas d'argent !"))
         
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, member.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        user = await economy_repo.get_or_create_user(ctx.guild.id, member.id)
         
         color = discord.Color.from_str(config.get("color", "#F1C40F"))
         emoji = config.get("currency_emoji", "🪙")
@@ -149,22 +108,22 @@ class Economy(commands.Cog):
         )
         embed.add_field(
             name="💰 Portefeuille",
-            value=self.format_currency(user_data["balance"], config),
+            value=self.format_currency(user.balance, config),
             inline=True
         )
         embed.add_field(
             name="🏦 Banque",
-            value=self.format_currency(user_data["bank"], config),
+            value=self.format_currency(user.bank, config),
             inline=True
         )
         embed.add_field(
             name="📊 Total",
-            value=self.format_currency(user_data["balance"] + user_data["bank"], config),
+            value=self.format_currency(user.balance + user.bank, config),
             inline=True
         )
         embed.add_field(
             name="💵 Total gagné",
-            value=self.format_currency(user_data["total_earned"], config),
+            value=self.format_currency(user.total_earned, config),
             inline=True
         )
         
@@ -173,24 +132,19 @@ class Economy(commands.Cog):
     @commands.hybrid_command(name="daily", aliases=["quotidien"])
     async def daily(self, ctx: commands.Context):
         """Récupère ta récompense quotidienne"""
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        can_claim, remaining = await economy_repo.can_daily(ctx.guild.id, ctx.author.id)
         
-        # Check cooldown (24 hours)
-        last_daily = user_data["last_daily"]
-        cooldown = 86400  # 24 hours
-        
-        if time.time() - last_daily < cooldown:
-            remaining = int(cooldown - (time.time() - last_daily))
+        if not can_claim:
             return await ctx.send(embed=error_embed(
                 f"Tu as déjà récupéré ta récompense quotidienne !\n"
-                f"Reviens dans **{format_duration(remaining)}**"
+                f"Reviens dans **{format_duration(int(remaining))}**"
             ))
         
         amount = config.get("daily_amount", 100)
         
-        # Apply booster
-        booster_roles = json.loads(config.get("booster_roles", "{}"))
+        # boosters
+        booster_roles = config.get("booster_roles", {})
         multiplier = 1.0
         for role in ctx.author.roles:
             if str(role.id) in booster_roles:
@@ -198,10 +152,7 @@ class Economy(commands.Cog):
         
         amount = int(amount * multiplier)
         
-        await db.execute(
-            "UPDATE user_economy SET balance = balance + ?, last_daily = ?, total_earned = total_earned + ? WHERE guild_id = ? AND user_id = ?",
-            (amount, time.time(), amount, ctx.guild.id, ctx.author.id)
-        )
+        await economy_repo.do_daily(ctx.guild.id, ctx.author.id, amount)
         
         color = discord.Color.from_str(config.get("color", "#F1C40F"))
         embed = create_embed(
@@ -218,16 +169,14 @@ class Economy(commands.Cog):
     @commands.hybrid_command(name="work", aliases=["travail", "travailler"])
     async def work(self, ctx: commands.Context):
         """Travaille pour gagner de l'argent"""
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
-        
+        config = await economy_repo.get_config(ctx.guild.id)
         cooldown = config.get("work_cooldown", 3600)
-        last_work = user_data["last_work"]
         
-        if time.time() - last_work < cooldown:
-            remaining = int(cooldown - (time.time() - last_work))
+        can_work, remaining = await economy_repo.can_work(ctx.guild.id, ctx.author.id, cooldown)
+        
+        if not can_work:
             return await ctx.send(embed=error_embed(
-                f"Tu es fatigué ! Repose-toi **{format_duration(remaining)}**"
+                f"Tu es fatigué ! Repose-toi **{format_duration(int(remaining))}**"
             ))
         
         work_min = config.get("work_min", 50)
@@ -245,10 +194,7 @@ class Economy(commands.Cog):
             f"Tu as fait du babysitting et gagné",
         ]
         
-        await db.execute(
-            "UPDATE user_economy SET balance = balance + ?, last_work = ?, total_earned = total_earned + ? WHERE guild_id = ? AND user_id = ?",
-            (amount, time.time(), amount, ctx.guild.id, ctx.author.id)
-        )
+        await economy_repo.do_work(ctx.guild.id, ctx.author.id, amount)
         
         color = discord.Color.from_str(config.get("color", "#F1C40F"))
         embed = create_embed(
@@ -263,11 +209,11 @@ class Economy(commands.Cog):
     @app_commands.describe(amount="Montant à déposer (ou 'all')")
     async def deposit(self, ctx: commands.Context, amount: str):
         """Dépose de l'argent à la banque"""
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        user = await economy_repo.get_or_create_user(ctx.guild.id, ctx.author.id)
         
         if amount.lower() in ["all", "tout", "max"]:
-            amount = user_data["balance"]
+            amount = user.balance
         else:
             try:
                 amount = int(amount)
@@ -277,27 +223,24 @@ class Economy(commands.Cog):
         if amount <= 0:
             return await ctx.send(embed=error_embed("Le montant doit être positif !"))
         
-        if amount > user_data["balance"]:
+        if amount > user.balance:
             return await ctx.send(embed=error_embed("Tu n'as pas assez d'argent !"))
         
-        await db.execute(
-            "UPDATE user_economy SET balance = balance - ?, bank = bank + ? WHERE guild_id = ? AND user_id = ?",
-            (amount, amount, ctx.guild.id, ctx.author.id)
-        )
-        
-        await ctx.send(embed=success_embed(
-            f"Tu as déposé {self.format_currency(amount, config)} à la banque !"
-        ))
+        success = await economy_repo.deposit(ctx.guild.id, ctx.author.id, amount)
+        if success:
+            await ctx.send(embed=success_embed(
+                f"Tu as déposé {self.format_currency(amount, config)} à la banque !"
+            ))
     
     @commands.hybrid_command(name="withdraw", aliases=["wd", "retirer"])
     @app_commands.describe(amount="Montant à retirer (ou 'all')")
     async def withdraw(self, ctx: commands.Context, amount: str):
         """Retire de l'argent de la banque"""
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        user = await economy_repo.get_or_create_user(ctx.guild.id, ctx.author.id)
         
         if amount.lower() in ["all", "tout", "max"]:
-            amount = user_data["bank"]
+            amount = user.bank
         else:
             try:
                 amount = int(amount)
@@ -307,17 +250,14 @@ class Economy(commands.Cog):
         if amount <= 0:
             return await ctx.send(embed=error_embed("Le montant doit être positif !"))
         
-        if amount > user_data["bank"]:
+        if amount > user.bank:
             return await ctx.send(embed=error_embed("Tu n'as pas assez d'argent en banque !"))
         
-        await db.execute(
-            "UPDATE user_economy SET balance = balance + ?, bank = bank - ? WHERE guild_id = ? AND user_id = ?",
-            (amount, amount, ctx.guild.id, ctx.author.id)
-        )
-        
-        await ctx.send(embed=success_embed(
-            f"Tu as retiré {self.format_currency(amount, config)} de la banque !"
-        ))
+        success = await economy_repo.withdraw(ctx.guild.id, ctx.author.id, amount)
+        if success:
+            await ctx.send(embed=success_embed(
+                f"Tu as retiré {self.format_currency(amount, config)} de la banque !"
+            ))
     
     @commands.hybrid_command(name="pay", aliases=["give", "donner"])
     @app_commands.describe(member="Le membre à qui donner", amount="Montant à donner")
@@ -332,21 +272,11 @@ class Economy(commands.Cog):
         if amount <= 0:
             return await ctx.send(embed=error_embed("Le montant doit être positif !"))
         
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
-        await self.get_user_data(ctx.guild.id, member.id)
+        config = await economy_repo.get_config(ctx.guild.id)
         
-        if amount > user_data["balance"]:
+        success = await economy_repo.transfer(ctx.guild.id, ctx.author.id, member.id, amount)
+        if not success:
             return await ctx.send(embed=error_embed("Tu n'as pas assez d'argent !"))
-        
-        await db.execute(
-            "UPDATE user_economy SET balance = balance - ? WHERE guild_id = ? AND user_id = ?",
-            (amount, ctx.guild.id, ctx.author.id)
-        )
-        await db.execute(
-            "UPDATE user_economy SET balance = balance + ? WHERE guild_id = ? AND user_id = ?",
-            (amount, ctx.guild.id, member.id)
-        )
         
         await ctx.send(embed=success_embed(
             f"Tu as donné {self.format_currency(amount, config)} à {member.mention} !"
@@ -359,30 +289,27 @@ class Economy(commands.Cog):
         per_page = 10
         offset = (page - 1) * per_page
         
-        rows = await db.fetchall(
-            """SELECT user_id, balance, bank FROM user_economy 
-               WHERE guild_id = ? ORDER BY (balance + bank) DESC LIMIT ? OFFSET ?""",
-            (ctx.guild.id, per_page, offset)
-        )
+        users = await economy_repo.get_leaderboard(ctx.guild.id, limit=per_page, offset=offset)
         
-        total = await db.fetchone(
+        # compte total pour pagination
+        total_row = await db.fetchone(
             "SELECT COUNT(*) as count FROM user_economy WHERE guild_id = ?",
             (ctx.guild.id,)
         )
-        total_pages = (total["count"] // per_page) + 1
+        total_pages = (total_row["count"] // per_page) + 1
         
-        if not rows:
+        if not users:
             return await ctx.send(embed=info_embed("Personne n'a d'argent !"))
         
-        config = await self.get_config(ctx.guild.id)
+        config = await economy_repo.get_config(ctx.guild.id)
         color = discord.Color.from_str(config.get("color", "#F1C40F"))
         emoji = config.get("currency_emoji", "🪙")
         
         description = ""
-        for i, row in enumerate(rows, start=offset + 1):
-            member = ctx.guild.get_member(row["user_id"])
+        for i, user in enumerate(users, start=offset + 1):
+            member = ctx.guild.get_member(user.user_id)
             name = member.display_name if member else "Utilisateur inconnu"
-            total_money = row["balance"] + row["bank"]
+            total_money = user.balance + user.bank
             
             medal = ""
             if i == 1: medal = "🥇 "
@@ -406,11 +333,8 @@ class Economy(commands.Cog):
     @commands.hybrid_command(name="shop", aliases=["boutique", "magasin"])
     async def shop(self, ctx: commands.Context):
         """Affiche la boutique"""
-        config = await self.get_config(ctx.guild.id)
-        items = await db.fetchall(
-            "SELECT * FROM shop_items WHERE guild_id = ? ORDER BY price",
-            (ctx.guild.id,)
-        )
+        config = await economy_repo.get_config(ctx.guild.id)
+        items = await economy_repo.get_shop_items(ctx.guild.id)
         
         if not items:
             return await ctx.send(embed=info_embed("La boutique est vide !"))
@@ -420,14 +344,14 @@ class Economy(commands.Cog):
         
         description = ""
         for item in items:
-            stock_text = f"Stock: {item['stock']}" if item["stock"] >= 0 else "∞"
-            role = ctx.guild.get_role(item["role_id"]) if item["role_id"] else None
+            stock_text = f"Stock: {item.stock}" if item.stock >= 0 else "∞"
+            role = ctx.guild.get_role(item.role_id) if item.role_id else None
             role_text = f" → {role.mention}" if role else ""
             
-            description += f"**{item['id']}.** {item['name']}{role_text}\n"
-            description += f"└ {emoji} {item['price']:,} • {stock_text}\n"
-            if item["description"]:
-                description += f"└ *{item['description']}*\n"
+            description += f"**{item.id}.** {item.name}{role_text}\n"
+            description += f"└ {emoji} {item.price:,} • {stock_text}\n"
+            if item.description:
+                description += f"└ *{item.description}*\n"
             description += "\n"
         
         embed = create_embed(
@@ -443,52 +367,28 @@ class Economy(commands.Cog):
     @app_commands.describe(item_id="ID de l'article à acheter")
     async def buy(self, ctx: commands.Context, item_id: int):
         """Achète un article de la boutique"""
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        item = await economy_repo.get_shop_item(item_id)
         
-        item = await db.fetchone(
-            "SELECT * FROM shop_items WHERE id = ? AND guild_id = ?",
-            (item_id, ctx.guild.id)
-        )
-        
-        if not item:
+        if not item or item.guild_id != ctx.guild.id:
             return await ctx.send(embed=error_embed("Article introuvable !"))
         
-        if item["stock"] == 0:
-            return await ctx.send(embed=error_embed("Article en rupture de stock !"))
-        
-        if user_data["balance"] < item["price"]:
-            return await ctx.send(embed=error_embed("Tu n'as pas assez d'argent !"))
-        
-        if item["required_role_id"]:
-            required_role = ctx.guild.get_role(item["required_role_id"])
+        # check required role
+        if item.required_role_id:
+            required_role = ctx.guild.get_role(item.required_role_id)
             if required_role and required_role not in ctx.author.roles:
                 return await ctx.send(embed=error_embed(
                     f"Tu as besoin du rôle {required_role.mention} pour acheter cet article !"
                 ))
         
-        # Process purchase
-        await db.execute(
-            "UPDATE user_economy SET balance = balance - ? WHERE guild_id = ? AND user_id = ?",
-            (item["price"], ctx.guild.id, ctx.author.id)
-        )
+        success, message = await economy_repo.buy_item(ctx.guild.id, ctx.author.id, item_id)
         
-        if item["stock"] > 0:
-            await db.execute(
-                "UPDATE shop_items SET stock = stock - 1 WHERE id = ?",
-                (item_id,)
-            )
+        if not success:
+            return await ctx.send(embed=error_embed(message))
         
-        # Add to inventory
-        await db.execute(
-            """INSERT INTO user_inventory (guild_id, user_id, item_id, purchased_at)
-               VALUES (?, ?, ?, ?)""",
-            (ctx.guild.id, ctx.author.id, item_id, time.time())
-        )
-        
-        # Give role if applicable
-        if item["role_id"]:
-            role = ctx.guild.get_role(item["role_id"])
+        # donne le role si applicable
+        if item.role_id:
+            role = ctx.guild.get_role(item.role_id)
             if role:
                 try:
                     await ctx.author.add_roles(role, reason="Shop purchase")
@@ -496,7 +396,7 @@ class Economy(commands.Cog):
                     pass
         
         await ctx.send(embed=success_embed(
-            f"Tu as acheté **{item['name']}** pour {self.format_currency(item['price'], config)} !"
+            f"Tu as acheté **{item.name}** pour {self.format_currency(item.price, config)} !"
         ))
     
     @commands.hybrid_command(name="inventory", aliases=["inv", "inventaire"])
@@ -504,25 +404,18 @@ class Economy(commands.Cog):
         """Affiche ton inventaire"""
         member = member or ctx.author
         
-        items = await db.fetchall(
-            """SELECT i.name, COUNT(*) as qty FROM user_inventory ui
-               JOIN shop_items i ON ui.item_id = i.id
-               WHERE ui.guild_id = ? AND ui.user_id = ?
-               GROUP BY i.id""",
-            (ctx.guild.id, member.id)
-        )
+        items = await economy_repo.get_inventory(ctx.guild.id, member.id)
         
         if not items:
-            return await ctx.send(embed=info_embed(
-                f"{'Ton inventaire est vide' if member == ctx.author else f'L\\'inventaire de {member.display_name} est vide'} !"
-            ))
+            msg = "Ton inventaire est vide" if member == ctx.author else f"L'inventaire de {member.display_name} est vide"
+            return await ctx.send(embed=info_embed(f"{msg} !"))
         
-        config = await self.get_config(ctx.guild.id)
+        config = await economy_repo.get_config(ctx.guild.id)
         color = discord.Color.from_str(config.get("color", "#F1C40F"))
         
         description = ""
         for item in items:
-            description += f"• **{item['name']}** x{item['qty']}\n"
+            description += f"• **{item['name']}** x{item['quantity']}\n"
         
         embed = create_embed(
             title=f"🎒 Inventaire de {member.display_name}",
@@ -541,10 +434,10 @@ class Economy(commands.Cog):
         if amount <= 0:
             return await ctx.send(embed=error_embed("La mise doit être positive !"))
         
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        user = await economy_repo.get_or_create_user(ctx.guild.id, ctx.author.id)
         
-        if amount > user_data["balance"]:
+        if amount > user.balance:
             return await ctx.send(embed=error_embed("Tu n'as pas assez d'argent !"))
         
         choice = choice.lower()
@@ -556,12 +449,12 @@ class Economy(commands.Cog):
         won = choice == result
         
         if won:
-            await self.update_balance(ctx.guild.id, ctx.author.id, amount)
+            await economy_repo.add_balance(ctx.guild.id, ctx.author.id, amount)
             color = discord.Color.green()
             title = "🎉 Gagné !"
             desc = f"C'était **{result}** ! Tu gagnes {self.format_currency(amount, config)} !"
         else:
-            await self.update_balance(ctx.guild.id, ctx.author.id, -amount)
+            await economy_repo.add_balance(ctx.guild.id, ctx.author.id, -amount)
             color = discord.Color.red()
             title = "😢 Perdu..."
             desc = f"C'était **{result}**... Tu perds {self.format_currency(amount, config)}"
@@ -576,18 +469,17 @@ class Economy(commands.Cog):
         if amount <= 0:
             return await ctx.send(embed=error_embed("La mise doit être positive !"))
         
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, ctx.author.id)
+        config = await economy_repo.get_config(ctx.guild.id)
+        user = await economy_repo.get_or_create_user(ctx.guild.id, ctx.author.id)
         
-        if amount > user_data["balance"]:
+        if amount > user.balance:
             return await ctx.send(embed=error_embed("Tu n'as pas assez d'argent !"))
         
         emojis = ["🍒", "🍋", "🍊", "🍇", "💎", "7️⃣"]
-        weights = [30, 25, 20, 15, 7, 3]  # Weighted probabilities
+        weights = [30, 25, 20, 15, 7, 3]
         
         results = random.choices(emojis, weights=weights, k=3)
         
-        # Calculate winnings
         if results[0] == results[1] == results[2]:
             if results[0] == "7️⃣":
                 multiplier = 10
@@ -608,7 +500,7 @@ class Economy(commands.Cog):
             title = "🎰 Perdu..."
             color = discord.Color.red()
         
-        await self.update_balance(ctx.guild.id, ctx.author.id, winnings)
+        await economy_repo.add_balance(ctx.guild.id, ctx.author.id, winnings)
         
         slot_display = f"╔══════════╗\n║ {' '.join(results)} ║\n╚══════════╝"
         
@@ -641,10 +533,8 @@ class Economy(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def eco_give(self, ctx: commands.Context, member: discord.Member, amount: int):
         """Donne de l'argent à un membre"""
-        await self.get_user_data(ctx.guild.id, member.id)
-        await self.update_balance(ctx.guild.id, member.id, amount)
-        
-        config = await self.get_config(ctx.guild.id)
+        await economy_repo.add_balance(ctx.guild.id, member.id, amount)
+        config = await economy_repo.get_config(ctx.guild.id)
         await ctx.send(embed=success_embed(
             f"Tu as donné {self.format_currency(amount, config)} à {member.mention} !"
         ))
@@ -653,10 +543,8 @@ class Economy(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def eco_remove(self, ctx: commands.Context, member: discord.Member, amount: int):
         """Retire de l'argent à un membre"""
-        await self.get_user_data(ctx.guild.id, member.id)
-        await self.update_balance(ctx.guild.id, member.id, -amount)
-        
-        config = await self.get_config(ctx.guild.id)
+        await economy_repo.add_balance(ctx.guild.id, member.id, -amount)
+        config = await economy_repo.get_config(ctx.guild.id)
         await ctx.send(embed=success_embed(
             f"Tu as retiré {self.format_currency(amount, config)} à {member.mention} !"
         ))
@@ -665,13 +553,8 @@ class Economy(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def eco_set(self, ctx: commands.Context, member: discord.Member, amount: int):
         """Définit le solde d'un membre"""
-        await self.get_user_data(ctx.guild.id, member.id)
-        await db.execute(
-            "UPDATE user_economy SET balance = ? WHERE guild_id = ? AND user_id = ?",
-            (amount, ctx.guild.id, member.id)
-        )
-        
-        config = await self.get_config(ctx.guild.id)
+        await economy_repo.set_balance(ctx.guild.id, member.id, amount)
+        config = await economy_repo.get_config(ctx.guild.id)
         await ctx.send(embed=success_embed(
             f"Solde de {member.mention} défini à {self.format_currency(amount, config)} !"
         ))
@@ -686,20 +569,14 @@ class Economy(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def shop_add(self, ctx: commands.Context, price: int, *, name: str):
         """Ajoute un article à la boutique"""
-        await db.execute(
-            "INSERT INTO shop_items (guild_id, name, price, created_at) VALUES (?, ?, ?, ?)",
-            (ctx.guild.id, name, price, time.time())
-        )
+        await economy_repo.create_shop_item(ctx.guild.id, name, price)
         await ctx.send(embed=success_embed(f"Article **{name}** ajouté pour **{price}** !"))
     
     @eco_shop.command(name="remove")
     @commands.has_permissions(administrator=True)
     async def shop_remove(self, ctx: commands.Context, item_id: int):
         """Supprime un article de la boutique"""
-        await db.execute(
-            "DELETE FROM shop_items WHERE id = ? AND guild_id = ?",
-            (item_id, ctx.guild.id)
-        )
+        await economy_repo.delete_shop_item(item_id)
         await ctx.send(embed=success_embed(f"Article #{item_id} supprimé !"))
     
     @eco_shop.command(name="role")
@@ -739,20 +616,14 @@ class Economy(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def eco_currency(self, ctx: commands.Context, name: str, emoji: str):
         """Définit le nom et l'emoji de la monnaie"""
-        await db.execute(
-            "UPDATE economy_config SET currency_name = ?, currency_emoji = ? WHERE guild_id = ?",
-            (name, emoji, ctx.guild.id)
-        )
+        await economy_repo.update_config(ctx.guild.id, currency_name=name, currency_emoji=emoji)
         await ctx.send(embed=success_embed(f"Monnaie définie : {emoji} {name}"))
     
     @ecoadmin.command(name="daily")
     @commands.has_permissions(administrator=True)
     async def eco_daily(self, ctx: commands.Context, amount: int):
         """Définit le montant de la récompense quotidienne"""
-        await db.execute(
-            "UPDATE economy_config SET daily_amount = ? WHERE guild_id = ?",
-            (amount, ctx.guild.id)
-        )
+        await economy_repo.update_config(ctx.guild.id, daily_amount=amount)
         await ctx.send(embed=success_embed(f"Récompense quotidienne définie à **{amount}**"))
 
 

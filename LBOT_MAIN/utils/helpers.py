@@ -1,5 +1,5 @@
 """
-Utility functions - Embeds, pagination, time formatting, etc.
+Fonctions utilitaires - embeds, pagination, format de temps, etc.
 """
 
 import discord
@@ -11,7 +11,7 @@ import re
 import humanize
 
 
-# ==================== EMBED HELPERS ====================
+# ============ EMBEDS ============
 
 def create_embed(
     title: str = None,
@@ -82,7 +82,7 @@ def info_embed(message: str, title: str = "Information") -> discord.Embed:
     )
 
 
-# ==================== PAGINATION ====================
+# ============ PAGINATION ============
 
 class Paginator(discord.ui.View):
     """Paginated embed view"""
@@ -168,7 +168,7 @@ class ConfirmView(discord.ui.View):
         self.stop()
 
 
-# ==================== TIME HELPERS ====================
+# ============ TEMPS ============
 
 def parse_duration(duration_str: str) -> Optional[timedelta]:
     """
@@ -230,7 +230,7 @@ def format_datetime(timestamp: float) -> str:
     return dt.strftime("%d/%m/%Y à %H:%M")
 
 
-# ==================== XP/LEVEL CALCULATIONS ====================
+# ============ CALCULS XP/LEVEL ============
 
 def xp_for_level(level: int) -> int:
     """Calculate total XP required for a level (exponential curve)"""
@@ -259,7 +259,7 @@ def progress_bar(current: int, total: int, length: int = 10) -> str:
     return "█" * filled + "░" * empty
 
 
-# ==================== MESSAGE FORMATTING ====================
+# ============ FORMAT MESSAGES ============
 
 def format_message(template: str, **kwargs) -> str:
     """
@@ -291,7 +291,7 @@ def format_message(template: str, **kwargs) -> str:
     return result
 
 
-# ==================== PERMISSION CHECKS ====================
+# ============ PERMISSIONS ============
 
 def is_admin():
     """Check if user has admin permissions"""
@@ -308,7 +308,7 @@ def is_mod():
     return commands.check(predicate)
 
 
-# ==================== MISC HELPERS ====================
+# ============ DIVERS ============
 
 def truncate(text: str, max_length: int = 1024, suffix: str = "...") -> str:
     """Truncate text to a maximum length"""

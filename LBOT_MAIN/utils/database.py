@@ -1,6 +1,6 @@
 """
-Database module - SQLite async database management
-All tables for: levels, economy, moderation, welcome, tickets, giveaways, etc.
+Module database - gestion SQLite async
+toutes les tables: levels, economy, moderation, welcome, tickets, giveaways, etc.
 """
 
 import aiosqlite
@@ -20,11 +20,27 @@ class Database:
         self.connection: Optional[aiosqlite.Connection] = None
     
     async def connect(self):
-        """Initialize database connection and create tables"""
+        """Connexion a la DB et creation des tables"""
         Path(self.db_path).parent.mkdir(parents=True, exist_ok=True)
         self.connection = await aiosqlite.connect(self.db_path)
         self.connection.row_factory = aiosqlite.Row
+        
+        # sqlite desactive les FK par defaut, faut les activer a la main
+        await self.connection.execute("PRAGMA foreign_keys = ON")
+        
+        # WAL = meilleures perfs en lecture, et ca evite de lock la db
+        await self.connection.execute("PRAGMA journal_mode = WAL")
+        
+        # si le bot et le dashboard ecrivent en meme temps ca peut lock
+        # 5sec de timeout ca laisse le temps de retry
+        await self.connection.execute("PRAGMA busy_timeout = 5000")
+        await self.connection.execute("PRAGMA synchronous = NORMAL")
+        
         await self._create_tables()
+        
+        # run les migrations en attente
+        from utils.migrations import run_migrations
+        await run_migrations(self.connection)
     
     async def close(self):
         """Close database connection"""

@@ -1,356 +1,235 @@
-# 🤖 DraftBot Clone
+# L3D3B07
 
-Bot Discord communautaire multi-usage inspiré de [DraftBot], développé en Python avec [discord.py](https://discordpy.readthedocs.io/). Il regroupe 12 modules couvrant la gestion complète d'un serveur Discord : niveaux, économie, modération, bienvenue, tickets, giveaways, starboard, anniversaires, invitations, sorties médias, alertes de jeux gratuits et messages automatiques.
+Bot Discord communautaire en Python. Clone de DraftBot avec 12 modules + dashboard web.
 
-Le bot inclut également un **dashboard web** (Flask) permettant de tout configurer via une interface graphique avec authentification Discord OAuth2.
-
----
-
-## Structure du projet
-
-```
-draftbot-clone/
-├── bot.py                  # Point d'entrée principal
-├── requirements.txt        # Dépendances Python du bot
-├── .env.example            # Template de configuration
-│
-├── cogs/                   # Modules du bot (12 cogs)
-│   ├── levels.py           # XP, niveaux, classements, récompenses
-│   ├── economy.py          # Monnaie virtuelle, boutique, jeux d'argent
-│   ├── moderation.py       # Ban, kick, mute, automod, logs
-│   ├── welcome.py          # Messages bienvenue/départ, auto-rôles
-│   ├── tickets.py          # Tickets de support avec transcripts
-│   ├── giveaways.py        # Concours avec boutons et conditions
-│   ├── starboard.py        # Mise en avant des messages populaires
-│   ├── birthdays.py        # Anniversaires avec annonces et rôle
-│   ├── invites.py          # Tracking d'invitations avec récompenses
-│   ├── releases.py         # Annonces sorties jeux/anime/séries/films
-│   ├── gamedeals.py        # Jeux gratuits Epic Games / Steam
-│   └── automessages.py     # Messages récurrents et rappels de bump
-│
-├── utils/
-│   ├── database.py         # Gestion SQLite (aiosqlite)
-│   └── helpers.py          # Fonctions utilitaires (embeds, parsing)
-│
-├── dashboard/              # Interface web de configuration
-│   ├── app.py              # Serveur Flask + API
-│   ├── requirements.txt    # Dépendances du dashboard
-│   ├── templates/          # Pages HTML (Jinja2)
-│   └── static/             # CSS
-│
-└── data/
-    └── bot.db              # Base SQLite (créée automatiquement)
-```
-
----
-
-## Prérequis
-
-- **Python 3.10+** ([télécharger](https://www.python.org/downloads/))
-- **Un bot Discord** créé sur le [Developer Portal](https://discord.com/developers/applications)
-- **Git** (optionnel, pour cloner le repo)
-
----
-
-## Installation
-
-### 1. Cloner ou télécharger le projet
+## Quick Start
 
 ```bash
+# clone le repo
 git clone https://github.com/LPFK/L3D3B07.git
-cd L3D3BO7
-```
+cd L3D3B07/LBOT_MAIN
 
-### 2. Installer les dépendances et mettre en place le venv
+# setup (cree le venv et installe les deps)
+./setup.sh   # linux/mac
+setup.bat    # windows
 
-1. - python -m venv L3D3BOT (Windows) | python3 -m venv RoR2MM (Linux/Mac)
-2. - RoR2MM\Scripts\activate (Windows)
+# config
+cp .env.exemple .env
+# edite .env avec ton token discord
 
-```bash
-pip install -r requirements.txt
-```
-
-### 3. Configurer le bot Discord
-
-#### a) Créer l'application
-
-1. Aller sur **https://discord.com/developers/applications**
-2. Cliquer sur **New Application** → donner un nom
-3. Dans l'onglet **Bot** :
-   - Cliquer sur **Reset Token** → copier le token
-   - Activer les 3 **Privileged Gateway Intents** :
-     - Presence Intent
-     - Server Members Intent
-     - Message Content Intent
-
-#### b) Inviter le bot sur ton serveur
-
-1. Aller dans **OAuth2** → **URL Generator**
-2. Cocher les scopes : `bot` et `applications.commands`
-3. Cocher les permissions :
-   - Manage Roles, Manage Channels, View Channels
-   - Kick Members, Ban Members
-   - Send Messages, Manage Messages, Embed Links, Attach Files
-   - Read Message History, Add Reactions, Use External Emojis
-   - Connect, Speak, Move Members
-
-   > Pour tester rapidement, cocher **Administrator** à la place.
-
-4. Copier l'URL générée, ouvrir le liens dans un navigateur et choisis un serveur.
-
-### 4. Configurer l'environnement
-
-```bash
-cp .env.example .env
-```
-
-Ouvrir `.env` et remplir au minimum :
-
-```env
-DISCORD_TOKEN=ton_token_ici
-BOT_PREFIX=!
-OWNER_ID=ton_id_discord
-```
-
-### 5. Lancer le bot
-
-```bash
+# lance
 python bot.py
 ```
 
-Le bot devrait se connecter et afficher :
+Le bot cree la DB automatiquement au premier lancement.
+
+## Structure
 
 ```
-INFO - Logged in as BotName#1234 (ID: 123456789)
-INFO - Connected to 1 guilds
-INFO - Loaded cog: cogs.levels
-INFO - Loaded cog: cogs.economy
-...
+LBOT_MAIN/
+├── bot.py                      # point d'entree
+├── cogs/                       # 12 modules
+│   ├── levels.py               # xp, niveaux, rewards
+│   ├── economy.py              # monnaie, shop, gambling
+│   ├── moderation.py           # ban, mute, automod
+│   ├── welcome.py              # bienvenue/depart
+│   ├── tickets.py              # support tickets
+│   ├── giveaways.py            # concours
+│   ├── starboard.py            # messages populaires
+│   ├── birthdays.py            # anniversaires
+│   ├── invites.py              # tracking invitations
+│   ├── releases.py             # sorties jeux/anime/films
+│   ├── gamedeals.py            # jeux gratuits epic/steam
+│   └── automessages.py         # messages recurrents
+│
+├── utils/
+│   ├── database.py             # sqlite async + migrations
+│   ├── helpers.py              # embeds, parsing, etc
+│   ├── migrations.py           # systeme de migrations sql
+│   └── repositories/           # pattern repository (data access)
+│       ├── levels.py
+│       ├── economy.py
+│       └── moderation.py
+│
+├── migrations/                 # fichiers .sql de migration
+│   ├── 001_temp_punishments.sql
+│   └── 002_mod_cases_indexes.sql
+│
+├── dashboard/                  # interface web flask
+│   ├── app.py
+│   ├── templates/
+│   └── static/
+│
+└── data/
+    └── bot.db                  # sqlite (cree auto)
 ```
 
----
-
-## Modules & Commandes
-
-Toutes les commandes utilisent le préfixe configuré (par défaut `!`). Les commandes admin nécessitent la permission **Administrateur**.
-
-### Niveaux (`levels.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!rank [@user]` | Affiche le rang et l'XP |
-| `!leaderboard` | Classement XP du serveur |
-| `!levels config` | Voir la configuration |
-| `!levels xp <montant>` | XP par message (admin) |
-| `!levels cooldown <sec>` | Cooldown entre gains (admin) |
-| `!levels channel [#salon]` | Salon d'annonce level-up (admin) |
-| `!levels reward <niveau> @role` | Ajouter une récompense (admin) |
-| `!levels ignore #salon` | Ignorer un salon (admin) |
-| `!levels reset [@user]` | Réinitialiser l'XP (admin) |
-
-### Économie (`economy.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!balance [@user]` | Voir le solde |
-| `!daily` | Récompense quotidienne |
-| `!work` | Travailler pour gagner des coins |
-| `!deposit <montant>` | Déposer en banque |
-| `!withdraw <montant>` | Retirer de la banque |
-| `!pay @user <montant>` | Transférer de l'argent |
-| `!shop` | Voir la boutique |
-| `!buy <article>` | Acheter un article |
-| `!coinflip <montant>` | Pile ou face |
-| `!slots <montant>` | Machine à sous |
-| `!rob @user` | Voler quelqu'un |
-| `!economy config` | Configuration (admin) |
-
-### Modération (`moderation.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!ban @user [raison]` | Bannir |
-| `!tempban @user <durée> [raison]` | Ban temporaire |
-| `!kick @user [raison]` | Expulser |
-| `!mute @user [durée] [raison]` | Rendre muet |
-| `!unmute @user` | Retirer le mute |
-| `!warn @user [raison]` | Avertir |
-| `!warnings @user` | Voir les avertissements |
-| `!clear <nombre>` | Supprimer des messages |
-| `!cases @user` | Historique de modération |
-| `!mod config` | Configuration automod (admin) |
-
-### Bienvenue (`welcome.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!welcome channel #salon` | Salon de bienvenue (admin) |
-| `!welcome message <texte>` | Message personnalisé (admin) |
-| `!welcome goodbye #salon` | Salon de départ (admin) |
-| `!welcome autorole @role` | Rôle auto aux nouveaux (admin) |
-| `!welcome test` | Tester le message (admin) |
-
-Variables : `{user}`, `{server}`, `{count}`, `{name}`
-
-### Tickets (`tickets.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!ticket` | Ouvrir un ticket |
-| `!ticket close` | Fermer un ticket |
-| `!ticket setup` | Configurer le système (admin) |
-| `!ticket panel [#salon]` | Envoyer le panel de création (admin) |
-
-### Giveaways (`giveaways.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!gstart <durée> <nb_gagnants> <prix>` | Créer un giveaway (admin) |
-| `!gend <id>` | Terminer manuellement (admin) |
-| `!greroll <id>` | Relancer le tirage (admin) |
-| `!gcancel <id>` | Annuler (admin) |
-| `!glist` | Giveaways actifs |
-| `!grequire <id> role/level <valeur>` | Ajouter une condition (admin) |
-
-### Starboard (`starboard.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!starboard enable/disable` | Activer/désactiver (admin) |
-| `!starboard channel #salon` | Salon starboard (admin) |
-| `!starboard threshold <n>` | Réactions minimum (admin) |
-| `!starboard emoji <emoji>` | Emoji à utiliser (admin) |
-| `!starboard random` | Message aléatoire du starboard |
-| `!starboard stats` | Statistiques |
-
-### Anniversaires (`birthdays.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!birthday set <JJ/MM>` | Enregistrer son anniversaire |
-| `!birthday remove` | Supprimer |
-| `!birthday list` | Prochains anniversaires |
-| `!birthday today` | Anniversaires du jour |
-| `!birthday config` | Configuration (admin) |
-
-### Invitations (`invites.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!invites [@user]` | Voir ses invitations |
-| `!invites leaderboard` | Classement |
-| `!invites who @user` | Qui a invité ce membre |
-| `!invites codes [@user]` | Codes d'invitation actifs |
-| `!invites config` | Configuration (admin) |
-| `!invites reward add <nb> @role` | Récompense d'invitations (admin) |
-
-### Sorties médias (`releases.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!releases enable/disable` | Activer/désactiver (admin) |
-| `!releases games #salon [@role]` | Sorties jeux (admin) |
-| `!releases anime #salon [@role]` | Sorties anime (admin) |
-| `!releases series #salon [@role]` | Sorties séries (admin) |
-| `!releases films #salon [@role]` | Sorties films (admin) |
-| `!releases check` | Forcer la vérification (admin) |
-| `!releases apikey tmdb/rawg <clé>` | Configurer une clé API (admin) |
-
-### Deals & Jeux gratuits (`gamedeals.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!deals enable/disable` | Activer/désactiver (admin) |
-| `!deals epic #salon [@role]` | Salon Epic Games (admin) |
-| `!deals steam #salon [@role]` | Salon Steam (admin) |
-| `!deals steammin <pourcentage>` | Réduction minimum Steam (admin) |
-| `!deals free` | Jeux gratuits actuels |
-| `!deals check` | Forcer la vérification (admin) |
-
-### Messages automatiques (`automessages.py`)
-
-| Commande | Description |
-|----------|-------------|
-| `!automsg add #salon <intervalle> <message>` | Créer un message récurrent (admin) |
-| `!automsg addembed #salon <intervalle> <json>` | Message avec embed (admin) |
-| `!automsg remove <id>` | Supprimer (admin) |
-| `!automsg enable/disable <id>` | Activer/désactiver (admin) |
-| `!automsg test <id>` | Tester un message (admin) |
-| `!automsg interval <id> <durée>` | Changer l'intervalle (admin) |
-| `!bump enable/disable` | Rappels de bump (admin) |
-| `!bump channel #salon` | Salon des rappels (admin) |
-| `!bump role @role` | Rôle à mentionner (admin) |
-| `!bump cooldown <durée>` | Temps entre bumps (admin) |
-| `!bump message <texte>` | Message de rappel (admin) |
-| `!bump thank <texte>` | Remerciement auto (admin) |
-
----
-
-## Clés API optionnelles
-
-Certains modules nécessitent des clés API externes (gratuites) :
-
-| Module | API | Requis ? | Obtenir |
-|--------|-----|----------|---------|
-| Sorties jeux | RAWG | Optionnel | [rawg.io/apidocs](https://rawg.io/apidocs) |
-| Sorties anime | AniList | Non (gratuit, pas de clé) | — |
-| Sorties séries/films | TMDB | **Oui** | [themoviedb.org/settings/api](https://www.themoviedb.org/settings/api) |
-| Jeux gratuits Epic | Epic Games | Non (gratuit, pas de clé) | — |
-| Deals Steam | Steam | Non (gratuit, pas de clé) | — |
-
-Ajouter les clés dans `.env` :
+## Config (.env)
 
 ```env
-TMDB_API_KEY=ta_cle_tmdb
-RAWG_API_KEY=ta_cle_rawg
+# obligatoire
+DISCORD_TOKEN=ton_token_discord
+BOT_PREFIX=!
+OWNER_ID=ton_id_discord
+
+# optionnel - apis externes
+TMDB_API_KEY=xxx              # pour sorties films/series
+RAWG_API_KEY=xxx              # pour sorties jeux
+
+# dashboard
+DISCORD_CLIENT_ID=xxx
+DISCORD_CLIENT_SECRET=xxx
+DISCORD_REDIRECT_URI=http://localhost:5000/callback
+DASHBOARD_SECRET=un_secret_random
 ```
 
----
+## Modules
 
-## Dashboard Web
+### Niveaux
+XP sur les messages, vocal, leaderboard, rewards par niveau.
 
-Le projet inclut un dashboard web pour configurer le bot visuellement. Voir le [README du dashboard](dashboard/README.md) pour les instructions d'installation.
+```
+!rank [@user]     - voir son niveau
+!leaderboard      - classement
+!leveladmin       - config (admin)
+```
+
+### Economie
+Monnaie virtuelle, daily, work, shop, coinflip, slots.
+
+```
+!balance          - voir son solde
+!daily            - reward quotidienne
+!work             - travailler
+!shop             - boutique
+!buy <id>         - acheter
+!coinflip <mise>  - pile ou face
+```
+
+### Moderation
+Ban, kick, mute (timeout discord), warns, automod.
+
+```
+!ban @user [duree] [raison]
+!kick @user [raison]
+!mute @user <duree> [raison]
+!warn @user [raison]
+!warnings @user
+!clear <nb>
+!modlog channel #salon
+```
+
+### Welcome
+Messages de bienvenue/depart, auto-roles.
+
+### Tickets
+Systeme de tickets support avec boutons.
+
+### Giveaways
+Concours avec duree, nb gagnants, conditions.
+
+### Starboard
+Met en avant les messages avec X reactions.
+
+### Birthdays
+Annonces d'anniversaires automatiques.
+
+### Invites
+Tracking des invitations avec rewards.
+
+### Releases
+Annonces sorties jeux/anime/series/films (APIs externes).
+
+### Gamedeals
+Jeux gratuits Epic Games + deals Steam.
+
+### Automessages
+Messages recurrents programmables.
+
+## Dashboard
+
+Interface web pour configurer le bot.
 
 ```bash
 cd dashboard
 pip install -r requirements.txt
 python app.py
-# → http://localhost:5000
+# -> http://localhost:5000
 ```
 
----
+Connecte-toi avec Discord OAuth2 pour acceder aux serveurs.
 
-## Base de données
+**Securite:**
+- Protection CSRF sur tous les formulaires
+- Rate limiting sur les APIs (10 req/min pour les writes)
+- Cookies HttpOnly + SameSite
 
-Le bot utilise **SQLite** via `aiosqlite`. La base de données est créée automatiquement au premier lancement dans `data/bot.db`.
+## Architecture
 
-Elle contient environ 35 tables couvrant tous les modules. Toutes les données sont isolées par serveur (guild) grâce à des clés composites `(guild_id, user_id)`.
+### Pattern Repository
 
-Pour inspecter la base manuellement :
+Les cogs n'accedent plus directement a la DB. Ils passent par des repositories qui:
+- Cachent les configs (TTL 60s)
+- Pre-parsent les champs JSON
+- Centralisent le SQL
 
-```bash
-sqlite3 data/bot.db
-.tables
-.schema user_levels
-SELECT * FROM guild_settings;
+```python
+# avant (dans le cog)
+row = await db.fetchone("SELECT * FROM levels_config WHERE guild_id = ?", (guild_id,))
+ignored = json.loads(row.get("ignored_channels", "[]"))
+
+# apres
+config = await levels_repo.get_config(guild_id)
+# config["ignored_channels"] est deja une list
 ```
 
----
+### Migrations
 
-## Dépannage
+Les evolutions de schema sont gerees par des fichiers SQL dans `migrations/`:
 
-| Problème | Solution |
+```
+migrations/
+├── 001_temp_punishments.sql
+├── 002_mod_cases_indexes.sql
+└── 003_ta_prochaine_migration.sql
+```
+
+Au demarrage, le bot execute automatiquement les migrations pas encore appliquees.
+
+Pour ajouter une migration:
+1. Cree `migrations/XXX_description.sql`
+2. Utilise `IF NOT EXISTS` pour etre idempotent
+3. Le numero doit etre sequentiel
+
+## Setup Discord
+
+1. Cree une app sur https://discord.com/developers/applications
+2. Dans **Bot**, active les 3 intents:
+   - Presence Intent
+   - Server Members Intent
+   - Message Content Intent
+3. Dans **OAuth2 > URL Generator**:
+   - Scopes: `bot` + `applications.commands`
+   - Permissions: Administrator (ou les perms specifiques)
+4. Copie l'URL et invite le bot
+
+## Depannage
+
+| Probleme | Solution |
 |----------|----------|
-| `ModuleNotFoundError` | Lance `pip install -r requirements.txt` |
-| Le bot ne répond pas aux commandes | Vérifie que **Message Content Intent** est activé sur le Developer Portal |
-| `on_member_join` ne se déclenche pas | Vérifie que **Server Members Intent** est activé |
-| `DISCORD_TOKEN not found` | Vérifie que le fichier `.env` existe et contient le token |
-| Le bot ne voit pas les salons | Vérifie les permissions du bot sur le serveur |
-| Les sorties séries/films ne marchent pas | Configure `TMDB_API_KEY` dans `.env` |
-| Erreur `aiosqlite` | Vérifie que tu as Python 3.10+ |
+| Le bot repond pas | Active Message Content Intent dans le dev portal |
+| `on_member_join` marche pas | Active Server Members Intent |
+| `ModuleNotFoundError` | `pip install -r requirements.txt` |
+| Dashboard OAuth loop | Verifie que REDIRECT_URI est exactement le meme partout |
+| Sorties films/series vides | Configure TMDB_API_KEY |
 
----
+## Stack
+
+- Python 3.10+
+- discord.py 2.x
+- aiosqlite (SQLite async)
+- Flask + flask-wtf + flask-limiter (dashboard)
 
 ## Licence
 
-Projet personnel à but éducatif. Utilise les APIs de Discord, RAWG, AniList, TMDB, Epic Games et Steam selon leurs conditions d'utilisation respectives.
+Projet perso/educatif. Utilise les APIs Discord, RAWG, AniList, TMDB, Epic Games, Steam.

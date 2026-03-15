@@ -1,5 +1,5 @@
 """
-Giveaways Cog - Système de giveaways avec participation par réaction
+Cog Giveaways - giveaways avec participation par reaction
 """
 
 import discord

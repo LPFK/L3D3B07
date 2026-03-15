@@ -1,5 +1,5 @@
 """
-Welcome Cog - Welcome/goodbye messages, auto-roles, DM messages
+Cog Welcome - messages bienvenue/aurevoir, auto-roles, DM
 """
 
 import discord
@@ -16,13 +16,12 @@ from utils.helpers import (
 
 
 class Welcome(commands.Cog):
-    """Système de bienvenue et d'au revoir"""
+    """Systeme de bienvenue"""
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
     
     async def get_config(self, guild_id: int) -> dict:
-        """Get welcome config"""
         row = await db.fetchone(
             "SELECT * FROM welcome_config WHERE guild_id = ?", (guild_id,)
         )

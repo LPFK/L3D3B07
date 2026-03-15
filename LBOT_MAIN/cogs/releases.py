@@ -1,10 +1,7 @@
 """
-Releases Cog - Annonces automatiques de sorties (Jeux, Anime, Séries, Films)
+Cog Releases - annonces auto de sorties (jeux, anime, series, films)
 
-APIs utilisées:
-- RAWG.io pour les jeux vidéo
-- AniList (GraphQL) pour les anime
-- TMDB pour les séries/films
+APIs: RAWG (jeux), AniList (anime), TMDB (series/films)
 """
 
 import discord

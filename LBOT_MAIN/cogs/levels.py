@@ -1,24 +1,26 @@
 """
-Levels Cog - XP system, leveling, rewards, leaderboard, rank cards
+Cog Levels - systeme d'XP, niveaux, recompenses, classement
+
+utilise levels_repo pour les acces DB (voir utils/repositories/levels.py)
+le repo gere le cache de config et centralise le SQL
 """
 
 import discord
 from discord.ext import commands, tasks
 from discord import app_commands
 import time
-import json
 import random
-from io import BytesIO
 from typing import Optional
 
 from utils.database import db
+from utils.repositories.levels import levels_repo, UserLevel
 from utils.helpers import (
     create_embed, success_embed, error_embed, info_embed,
     xp_for_level, level_from_xp, xp_progress, progress_bar,
     format_message, Paginator, is_admin, chunk_list
 )
 
-# Try to import PIL for rank cards
+# PIL pour les cartes de rank (optionnel)
 try:
     from PIL import Image, ImageDraw, ImageFont, ImageFilter
     PIL_AVAILABLE = True
@@ -27,100 +29,58 @@ except ImportError:
 
 
 class Levels(commands.Cog):
-    """Système de niveaux et d'XP"""
+    """Systeme de niveaux et d'XP"""
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.xp_cooldowns: dict[tuple[int, int], float] = {}  # (guild_id, user_id) -> timestamp
-        self.voice_tracking: dict[tuple[int, int], float] = {}  # (guild_id, user_id) -> join_time
+        self.xp_cooldowns: dict[tuple[int, int], float] = {}
+        self.voice_tracking: dict[tuple[int, int], float] = {}
     
     async def cog_load(self):
-        """Start background tasks"""
         self.voice_xp_task.start()
     
     async def cog_unload(self):
-        """Stop background tasks"""
         self.voice_xp_task.cancel()
     
-    async def get_config(self, guild_id: int) -> dict:
-        """Get level config for a guild"""
-        row = await db.fetchone(
-            "SELECT * FROM levels_config WHERE guild_id = ?", (guild_id,)
-        )
-        if row:
-            return dict(row)
-        
-        # Create default config
-        await db.execute(
-            "INSERT OR IGNORE INTO levels_config (guild_id) VALUES (?)", (guild_id,)
-        )
-        row = await db.fetchone(
-            "SELECT * FROM levels_config WHERE guild_id = ?", (guild_id,)
-        )
-        return dict(row)
-    
-    async def get_user_data(self, guild_id: int, user_id: int) -> dict:
-        """Get user level data"""
-        row = await db.fetchone(
-            "SELECT * FROM user_levels WHERE guild_id = ? AND user_id = ?",
-            (guild_id, user_id)
-        )
-        if row:
-            return dict(row)
-        
-        # Create new user entry
-        await db.execute(
-            "INSERT OR IGNORE INTO user_levels (guild_id, user_id) VALUES (?, ?)",
-            (guild_id, user_id)
-        )
-        return {
-            "guild_id": guild_id, "user_id": user_id,
-            "xp": 0, "level": 0, "total_messages": 0,
-            "voice_time": 0, "last_xp_time": 0
-        }
-    
     async def add_xp(self, member: discord.Member, amount: int) -> Optional[int]:
-        """Add XP to a user, returns new level if leveled up"""
-        config = await self.get_config(member.guild.id)
-        user_data = await self.get_user_data(member.guild.id, member.id)
+        """ajoute de l'xp, retourne le nouveau niveau si level up"""
+        config = await levels_repo.get_config(member.guild.id)
+        user = await levels_repo.get_or_create_user(member.guild.id, member.id)
         
-        old_level = user_data["level"]
-        new_xp = user_data["xp"] + amount
+        old_level = user.level
+        new_xp = user.xp + amount
         new_level = level_from_xp(new_xp)
         
-        # Check max level
+        # check max level
         max_level = config.get("max_level", 0)
         if max_level > 0 and new_level > max_level:
             new_level = max_level
             new_xp = xp_for_level(max_level)
         
-        await db.execute(
-            """UPDATE user_levels 
-               SET xp = ?, level = ?, total_messages = total_messages + 1, last_xp_time = ?
-               WHERE guild_id = ? AND user_id = ?""",
-            (new_xp, new_level, time.time(), member.guild.id, member.id)
-        )
+        # update via repo
+        user.xp = new_xp
+        user.level = new_level
+        user.total_messages += 1
+        user.last_xp_time = time.time()
+        await levels_repo.save_user(user)
         
         if new_level > old_level:
             return new_level
         return None
     
     async def check_rewards(self, member: discord.Member, level: int):
-        """Give level rewards"""
-        rewards = await db.fetchall(
-            "SELECT * FROM level_rewards WHERE guild_id = ? AND level <= ? ORDER BY level",
-            (member.guild.id, level)
-        )
+        """donne les rewards de niveau"""
+        rewards = await levels_repo.get_rewards_for_level(member.guild.id, level)
         
         roles_to_add = []
         roles_to_remove = []
         
         for reward in rewards:
-            role = member.guild.get_role(reward["role_id"])
+            role = member.guild.get_role(reward.role_id)
             if role:
-                if reward["level"] == level:
+                if reward.level == level:
                     roles_to_add.append(role)
-                elif reward["remove_previous"]:
+                elif reward.remove_previous:
                     roles_to_remove.append(role)
         
         try:
@@ -133,11 +93,11 @@ class Levels(commands.Cog):
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Handle XP gain from messages"""
+        """gere le gain d'xp sur les messages"""
         if message.author.bot or not message.guild:
             return
         
-        # Check if guild has levels enabled
+        # check si levels actifs
         settings = await db.fetchone(
             "SELECT levels_enabled FROM guild_settings WHERE guild_id = ?",
             (message.guild.id,)
@@ -145,19 +105,20 @@ class Levels(commands.Cog):
         if not settings or not settings["levels_enabled"]:
             return
         
-        config = await self.get_config(message.guild.id)
+        # config cached par le repo
+        config = await levels_repo.get_config(message.guild.id)
         
-        # Check ignored channels
-        ignored_channels = json.loads(config.get("ignored_channels", "[]"))
+        # check ignored channels (deja parse en list par le cache)
+        ignored_channels = config.get("ignored_channels", [])
         if message.channel.id in ignored_channels:
             return
         
-        # Check ignored roles
-        ignored_roles = json.loads(config.get("ignored_roles", "[]"))
+        # check ignored roles
+        ignored_roles = config.get("ignored_roles", [])
         if any(role.id in ignored_roles for role in message.author.roles):
             return
         
-        # Check cooldown
+        # check cooldown (en memoire pour la perf)
         key = (message.guild.id, message.author.id)
         cooldown = config.get("xp_cooldown", 60)
         if key in self.xp_cooldowns:
@@ -166,9 +127,9 @@ class Levels(commands.Cog):
         
         self.xp_cooldowns[key] = time.time()
         
-        # Calculate XP with boosters
+        # calcul xp avec boosters
         base_xp = config.get("xp_per_message", 15)
-        booster_roles = json.loads(config.get("booster_roles", "{}"))
+        booster_roles = config.get("booster_roles", {})
         
         multiplier = 1.0
         for role in message.author.roles:
@@ -177,13 +138,13 @@ class Levels(commands.Cog):
         
         xp_amount = int(base_xp * multiplier * random.uniform(0.8, 1.2))
         
-        # Add XP and check for level up
+        # add xp et check level up
         new_level = await self.add_xp(message.author, xp_amount)
         
         if new_level:
             await self.check_rewards(message.author, new_level)
             
-            # Send level up message
+            # envoie le message de level up
             channel_id = config.get("level_up_channel_id")
             channel = message.guild.get_channel(channel_id) if channel_id else message.channel
             
@@ -213,24 +174,21 @@ class Levels(commands.Cog):
         before: discord.VoiceState,
         after: discord.VoiceState
     ):
-        """Track voice channel time for XP"""
+        """track le temps vocal pour l'xp"""
         if member.bot:
             return
         
         key = (member.guild.id, member.id)
         
-        # User joined voice
         if before.channel is None and after.channel is not None:
             self.voice_tracking[key] = time.time()
-        
-        # User left voice
         elif before.channel is not None and after.channel is None:
             if key in self.voice_tracking:
                 del self.voice_tracking[key]
     
     @tasks.loop(minutes=1)
     async def voice_xp_task(self):
-        """Give XP for voice channel time"""
+        """donne de l'xp pour le temps en vocal"""
         for (guild_id, user_id), join_time in list(self.voice_tracking.items()):
             guild = self.bot.get_guild(guild_id)
             if not guild:
@@ -241,18 +199,18 @@ class Levels(commands.Cog):
                 del self.voice_tracking[(guild_id, user_id)]
                 continue
             
-            # Don't give XP if alone or muted/deafened
+            # pas d'xp si seul ou mute
             voice_members = [m for m in member.voice.channel.members if not m.bot]
             if len(voice_members) < 2 or member.voice.self_mute or member.voice.self_deaf:
                 continue
             
-            config = await self.get_config(guild_id)
+            config = await levels_repo.get_config(guild_id)
             xp_per_min = config.get("xp_voice_per_minute", 5)
             
             if xp_per_min > 0:
                 await self.add_xp(member, xp_per_min)
                 
-                # Update voice time
+                # update voice time directement (pas dans le repo pour l'instant)
                 await db.execute(
                     "UPDATE user_levels SET voice_time = voice_time + 60 WHERE guild_id = ? AND user_id = ?",
                     (guild_id, user_id)
@@ -273,20 +231,11 @@ class Levels(commands.Cog):
         if member.bot:
             return await ctx.send(embed=error_embed("Les bots n'ont pas de niveau !"))
         
-        config = await self.get_config(ctx.guild.id)
-        user_data = await self.get_user_data(ctx.guild.id, member.id)
+        config = await levels_repo.get_config(ctx.guild.id)
+        user = await levels_repo.get_or_create_user(ctx.guild.id, member.id)
+        rank = await levels_repo.get_rank(ctx.guild.id, member.id)
         
-        # Get rank
-        rank_row = await db.fetchone(
-            """SELECT COUNT(*) + 1 as rank FROM user_levels 
-               WHERE guild_id = ? AND xp > (SELECT xp FROM user_levels WHERE guild_id = ? AND user_id = ?)""",
-            (ctx.guild.id, ctx.guild.id, member.id)
-        )
-        rank = rank_row["rank"] if rank_row else 1
-        
-        level = user_data["level"]
-        xp = user_data["xp"]
-        current_xp, needed_xp = xp_progress(xp, level)
+        current_xp, needed_xp = xp_progress(user.xp, user.level)
         
         color = discord.Color.from_str(config.get("color", "#5865F2"))
         bar = progress_bar(current_xp, needed_xp, 15)
@@ -297,15 +246,15 @@ class Levels(commands.Cog):
             thumbnail=member.display_avatar.url
         )
         embed.add_field(name="Rang", value=f"#{rank}", inline=True)
-        embed.add_field(name="Niveau", value=str(level), inline=True)
-        embed.add_field(name="XP Total", value=f"{xp:,}", inline=True)
+        embed.add_field(name="Niveau", value=str(user.level), inline=True)
+        embed.add_field(name="XP Total", value=f"{user.xp:,}", inline=True)
         embed.add_field(
             name="Progression",
             value=f"{bar}\n{current_xp:,} / {needed_xp:,} XP",
             inline=False
         )
-        embed.add_field(name="Messages", value=f"{user_data['total_messages']:,}", inline=True)
-        embed.add_field(name="Temps vocal", value=f"{user_data['voice_time'] // 60} min", inline=True)
+        embed.add_field(name="Messages", value=f"{user.total_messages:,}", inline=True)
+        embed.add_field(name="Temps vocal", value=f"{user.voice_time // 60} min", inline=True)
         
         await ctx.send(embed=embed)
     
@@ -316,28 +265,20 @@ class Levels(commands.Cog):
         per_page = 10
         offset = (page - 1) * per_page
         
-        rows = await db.fetchall(
-            """SELECT user_id, xp, level FROM user_levels 
-               WHERE guild_id = ? ORDER BY xp DESC LIMIT ? OFFSET ?""",
-            (ctx.guild.id, per_page, offset)
-        )
+        users = await levels_repo.get_leaderboard(ctx.guild.id, limit=per_page, offset=offset)
+        total = await levels_repo.get_total_users(ctx.guild.id)
+        total_pages = (total // per_page) + 1
         
-        total = await db.fetchone(
-            "SELECT COUNT(*) as count FROM user_levels WHERE guild_id = ?",
-            (ctx.guild.id,)
-        )
-        total_pages = (total["count"] // per_page) + 1
-        
-        if not rows:
+        if not users:
             return await ctx.send(embed=info_embed("Aucun membre dans le classement !"))
         
-        config = await self.get_config(ctx.guild.id)
+        config = await levels_repo.get_config(ctx.guild.id)
         color = discord.Color.from_str(config.get("color", "#5865F2"))
         
         description = ""
-        for i, row in enumerate(rows, start=offset + 1):
-            member = ctx.guild.get_member(row["user_id"])
-            name = member.display_name if member else f"Utilisateur inconnu"
+        for i, user in enumerate(users, start=offset + 1):
+            member = ctx.guild.get_member(user.user_id)
+            name = member.display_name if member else "Utilisateur inconnu"
             
             medal = ""
             if i == 1: medal = "🥇 "
@@ -345,7 +286,7 @@ class Levels(commands.Cog):
             elif i == 3: medal = "🥉 "
             
             description += f"{medal}**#{i}** {name}\n"
-            description += f"└ Niveau {row['level']} • {row['xp']:,} XP\n\n"
+            description += f"└ Niveau {user.level} • {user.xp:,} XP\n\n"
         
         embed = create_embed(
             title=f"🏆 Classement de {ctx.guild.name}",
@@ -359,22 +300,19 @@ class Levels(commands.Cog):
     @commands.hybrid_command(name="rewards", aliases=["recompenses"])
     async def rewards(self, ctx: commands.Context):
         """Affiche les récompenses de niveau"""
-        rows = await db.fetchall(
-            "SELECT * FROM level_rewards WHERE guild_id = ? ORDER BY level",
-            (ctx.guild.id,)
-        )
+        rewards = await levels_repo.get_rewards(ctx.guild.id)
         
-        if not rows:
+        if not rewards:
             return await ctx.send(embed=info_embed("Aucune récompense configurée !"))
         
-        config = await self.get_config(ctx.guild.id)
+        config = await levels_repo.get_config(ctx.guild.id)
         color = discord.Color.from_str(config.get("color", "#5865F2"))
         
         description = ""
-        for row in rows:
-            role = ctx.guild.get_role(row["role_id"])
+        for reward in rewards:
+            role = ctx.guild.get_role(reward.role_id)
             role_name = role.mention if role else "Rôle supprimé"
-            description += f"**Niveau {row['level']}** → {role_name}\n"
+            description += f"**Niveau {reward.level}** → {role_name}\n"
         
         embed = create_embed(
             title="🎁 Récompenses de niveau",
@@ -412,10 +350,7 @@ class Levels(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def reward_add(self, ctx: commands.Context, level: int, role: discord.Role):
         """Ajoute une récompense de niveau"""
-        await db.execute(
-            "INSERT OR REPLACE INTO level_rewards (guild_id, level, role_id) VALUES (?, ?, ?)",
-            (ctx.guild.id, level, role.id)
-        )
+        await levels_repo.add_reward(ctx.guild.id, level, role.id)
         await ctx.send(embed=success_embed(
             f"Le rôle {role.mention} sera donné au niveau **{level}** !"
         ))
@@ -424,10 +359,7 @@ class Levels(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def reward_remove(self, ctx: commands.Context, level: int):
         """Supprime une récompense de niveau"""
-        await db.execute(
-            "DELETE FROM level_rewards WHERE guild_id = ? AND level = ?",
-            (ctx.guild.id, level)
-        )
+        await levels_repo.remove_reward(ctx.guild.id, level)
         await ctx.send(embed=success_embed(f"Récompense du niveau {level} supprimée !"))
     
     @leveladmin.command(name="setxp")
@@ -435,11 +367,7 @@ class Levels(commands.Cog):
     async def setxp(self, ctx: commands.Context, member: discord.Member, xp: int):
         """Définit l'XP d'un membre"""
         level = level_from_xp(xp)
-        await db.execute(
-            """INSERT INTO user_levels (guild_id, user_id, xp, level) VALUES (?, ?, ?, ?)
-               ON CONFLICT(guild_id, user_id) DO UPDATE SET xp = ?, level = ?""",
-            (ctx.guild.id, member.id, xp, level, xp, level)
-        )
+        await levels_repo.set_xp(ctx.guild.id, member.id, xp, level)
         await ctx.send(embed=success_embed(
             f"XP de {member.mention} défini à **{xp:,}** (niveau {level})"
         ))
@@ -449,9 +377,9 @@ class Levels(commands.Cog):
     async def addxp_cmd(self, ctx: commands.Context, member: discord.Member, xp: int):
         """Ajoute de l'XP à un membre"""
         new_level = await self.add_xp(member, xp)
-        user_data = await self.get_user_data(ctx.guild.id, member.id)
+        user = await levels_repo.get_user(ctx.guild.id, member.id)
         
-        msg = f"**{xp:,}** XP ajouté à {member.mention} ! (Total: {user_data['xp']:,})"
+        msg = f"**{xp:,}** XP ajouté à {member.mention} ! (Total: {user.xp:,})"
         if new_level:
             msg += f"\n🎉 Level up ! Niveau **{new_level}**"
         
@@ -461,30 +389,21 @@ class Levels(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def resetuser(self, ctx: commands.Context, member: discord.Member):
         """Remet à zéro l'XP d'un membre"""
-        await db.execute(
-            "DELETE FROM user_levels WHERE guild_id = ? AND user_id = ?",
-            (ctx.guild.id, member.id)
-        )
+        await levels_repo.reset_user(ctx.guild.id, member.id)
         await ctx.send(embed=success_embed(f"XP de {member.mention} remis à zéro !"))
     
     @leveladmin.command(name="xppermsg")
     @commands.has_permissions(administrator=True)
     async def xppermsg(self, ctx: commands.Context, amount: int):
         """Définit l'XP gagné par message"""
-        await db.execute(
-            "UPDATE levels_config SET xp_per_message = ? WHERE guild_id = ?",
-            (amount, ctx.guild.id)
-        )
+        await levels_repo.update_config(ctx.guild.id, xp_per_message=amount)
         await ctx.send(embed=success_embed(f"XP par message défini à **{amount}**"))
     
     @leveladmin.command(name="cooldown")
     @commands.has_permissions(administrator=True)
     async def set_cooldown(self, ctx: commands.Context, seconds: int):
         """Définit le cooldown entre les gains d'XP"""
-        await db.execute(
-            "UPDATE levels_config SET xp_cooldown = ? WHERE guild_id = ?",
-            (seconds, ctx.guild.id)
-        )
+        await levels_repo.update_config(ctx.guild.id, xp_cooldown=seconds)
         await ctx.send(embed=success_embed(f"Cooldown XP défini à **{seconds}** secondes"))
     
     @leveladmin.command(name="channel")
@@ -492,10 +411,7 @@ class Levels(commands.Cog):
     async def set_channel(self, ctx: commands.Context, channel: discord.TextChannel = None):
         """Définit le salon des annonces de level up"""
         channel_id = channel.id if channel else None
-        await db.execute(
-            "UPDATE levels_config SET level_up_channel_id = ? WHERE guild_id = ?",
-            (channel_id, ctx.guild.id)
-        )
+        await levels_repo.update_config(ctx.guild.id, level_up_channel_id=channel_id)
         
         if channel:
             await ctx.send(embed=success_embed(f"Annonces de level up dans {channel.mention}"))
@@ -506,10 +422,7 @@ class Levels(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def set_message(self, ctx: commands.Context, *, message: str):
         """Définit le message de level up"""
-        await db.execute(
-            "UPDATE levels_config SET level_up_message = ? WHERE guild_id = ?",
-            (message, ctx.guild.id)
-        )
+        await levels_repo.update_config(ctx.guild.id, level_up_message=message)
         
         preview = format_message(message, user=ctx.author.mention, level=10)
         await ctx.send(embed=success_embed(f"Message défini !\n\n**Aperçu:**\n{preview}"))

@@ -1,5 +1,5 @@
 """
-Tickets Cog - Support ticket system with transcripts
+Cog Tickets - systeme de tickets support avec transcripts
 """
 
 import discord
@@ -17,7 +17,7 @@ from utils.helpers import (
 
 
 class TicketButton(discord.ui.View):
-    """Persistent ticket creation button"""
+    """bouton persistant pour creer un ticket"""
     
     def __init__(self):
         super().__init__(timeout=None)

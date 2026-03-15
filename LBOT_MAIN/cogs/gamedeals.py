@@ -1,10 +1,7 @@
 """
-GameDeals Cog - Annonces de jeux gratuits et promotions (Steam, Epic Games)
+Cog GameDeals - annonces jeux gratuits et promos (Steam, Epic)
 
-Sources:
-- Epic Games Store (API gratuite)
-- Steam (RSS/API)
-- IsThereAnyDeal (optionnel)
+Sources: Epic Games Store, Steam RSS
 """
 
 import discord

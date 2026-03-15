@@ -668,6 +668,7 @@
     <script>
     // ==================== UTILS ====================
     const GUILD_ID = {{ guild_id }};
+    const CSRF_TOKEN = "{{ csrf_token() }}";
     const $ = (sel) => document.querySelector(sel);
     const $$ = (sel) => document.querySelectorAll(sel);
 
@@ -686,9 +687,21 @@
 
     async function apiCall(url, method = 'POST', data = null) {
         try {
-            const opts = {method, headers: {'Content-Type': 'application/json'}};
+            const opts = {
+                method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': CSRF_TOKEN
+                }
+            };
             if (data) opts.body = JSON.stringify(data);
             const resp = await fetch(url, opts);
+            
+            if (resp.status === 429) {
+                showToast('Trop de requêtes, attends un peu', 'error');
+                return null;
+            }
+            
             const json = await resp.json();
             if (json.success) {
                 showToast('Sauvegardé ✓');

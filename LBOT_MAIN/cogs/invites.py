@@ -1,12 +1,11 @@
 """
-Invites Cog - Système de tracking d'invitations (style InviBot/InviteTracker)
+Cog Invites - tracking d'invitations style InviteTracker
 
-Features:
-- Track qui a invité qui
-- Compteur d'invitations (regular, leaves, fake, bonus)
-- Leaderboard des top inviteurs
-- Messages de join/leave avec info inviteur
-- Récompenses d'invitations (rôles)
+- qui a invite qui
+- compteur invits (regular, leaves, fake, bonus)
+- leaderboard inviteurs
+- messages join/leave avec info inviteur
+- rewards d'invitations
 """
 
 import discord

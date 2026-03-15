@@ -1,5 +1,5 @@
 """
-Starboard Cog - Système de mise en avant des messages populaires
+Cog Starboard - mise en avant des messages populaires
 """
 
 import discord

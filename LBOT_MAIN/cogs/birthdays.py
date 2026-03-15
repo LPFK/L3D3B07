@@ -1,5 +1,5 @@
 """
-Birthdays Cog - Système d'anniversaires avec annonces automatiques
+Cog Birthdays - anniversaires avec annonces auto
 """
 
 import discord

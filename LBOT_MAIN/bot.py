@@ -1,6 +1,6 @@
 """
-DraftBot Clone - Main bot file
-A feature-rich Discord bot inspired by DraftBot
+Bot Discord communautaire
+clone de DraftBot avec levels, economy, moderation, etc.
 """
 
 import discord
@@ -13,10 +13,9 @@ from dotenv import load_dotenv
 
 from utils.database import db
 
-# Load environment variables
 load_dotenv()
 
-# Setup logging
+# logs en fichier + console
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -29,7 +28,7 @@ logger = logging.getLogger('draftbot')
 
 
 class DraftBot(commands.Bot):
-    """Main bot class"""
+    """le bot principal"""
     
     def __init__(self):
         intents = discord.Intents.all()
@@ -44,10 +43,10 @@ class DraftBot(commands.Bot):
         
         self.default_prefix = os.getenv("BOT_PREFIX", "!")
         self.start_time = None
-        self.prefix_cache: dict[int, str] = {}
+        self.prefix_cache: dict[int, str] = {}  # cache des prefix par serveur
     
     async def get_prefix(self, message: discord.Message) -> list[str]:
-        """Get guild-specific prefix or default"""
+        """recup le prefix du serveur ou le default"""
         prefixes = [self.default_prefix]
         
         if message.guild:
@@ -63,18 +62,17 @@ class DraftBot(commands.Bot):
                     self.prefix_cache[guild_id] = row["prefix"]
                     prefixes = [row["prefix"]]
         
-        # Always allow mention as prefix
+        # on peut toujours mentionner le bot comme prefix
         return commands.when_mentioned_or(*prefixes)(self, message)
     
     async def setup_hook(self):
-        """Called when bot is starting up"""
-        logger.info("Initializing bot...")
+        """au demarrage du bot"""
+        logger.info("Init...")
         
-        # Connect to database
         await db.connect()
-        logger.info("Database connected")
+        logger.info("DB ok")
         
-        # Load all cogs
+        # charge tous les cogs du dossier cogs/
         cogs_dir = Path(__file__).parent / "cogs"
         for cog_file in cogs_dir.glob("*.py"):
             if cog_file.name.startswith("_"):
@@ -82,26 +80,26 @@ class DraftBot(commands.Bot):
             cog_name = f"cogs.{cog_file.stem}"
             try:
                 await self.load_extension(cog_name)
-                logger.info(f"Loaded cog: {cog_name}")
+                logger.info(f"Cog charge: {cog_name}")
             except Exception as e:
-                logger.error(f"Failed to load {cog_name}: {e}")
+                logger.error(f"Erreur chargement {cog_name}: {e}")
         
-        # Sync slash commands
+        # sync les slash commands
         try:
             synced = await self.tree.sync()
-            logger.info(f"Synced {len(synced)} slash commands")
+            logger.info(f"{len(synced)} slash commands sync")
         except Exception as e:
-            logger.error(f"Failed to sync commands: {e}")
+            logger.error(f"Sync fail: {e}")
     
     async def on_ready(self):
-        """Called when bot is ready"""
+        """quand le bot est pret"""
         import time
         self.start_time = time.time()
         
-        logger.info(f"Logged in as {self.user} (ID: {self.user.id})")
-        logger.info(f"Connected to {len(self.guilds)} guilds")
+        logger.info(f"Connecte: {self.user} (ID: {self.user.id})")
+        logger.info(f"{len(self.guilds)} serveurs")
         
-        # Set presence
+        # status du bot
         activity = discord.Activity(
             type=discord.ActivityType.watching,
             name=f"{len(self.guilds)} serveurs | !help"
@@ -109,25 +107,26 @@ class DraftBot(commands.Bot):
         await self.change_presence(activity=activity)
     
     async def on_guild_join(self, guild: discord.Guild):
-        """Initialize settings when joining a new guild"""
+        """quand le bot rejoint un serveur"""
         await db.execute(
             "INSERT OR IGNORE INTO guild_settings (guild_id) VALUES (?)",
             (guild.id,)
         )
-        logger.info(f"Joined guild: {guild.name} (ID: {guild.id})")
+        logger.info(f"Rejoint: {guild.name} ({guild.id})")
     
     async def on_guild_remove(self, guild: discord.Guild):
-        """Clean up when leaving a guild"""
-        # Optionally clean up data (uncomment if you want to delete data on leave)
+        """quand le bot quitte un serveur"""
+        # on garde les donnees au cas ou (decommenter pour supprimer)
         # await db.execute("DELETE FROM guild_settings WHERE guild_id = ?", (guild.id,))
         if guild.id in self.prefix_cache:
             del self.prefix_cache[guild.id]
-        logger.info(f"Left guild: {guild.name} (ID: {guild.id})")
+        logger.info(f"Quitte: {guild.name} ({guild.id})")
     
     async def on_command_error(self, ctx: commands.Context, error: Exception):
-        """Global error handler"""
+        """gestion globale des erreurs"""
         from utils.helpers import error_embed
         
+        # commande inconnue = on ignore
         if isinstance(error, commands.CommandNotFound):
             return
         
@@ -167,24 +166,23 @@ class DraftBot(commands.Bot):
             ))
             return
         
-        # Log unexpected errors
-        logger.error(f"Unhandled error in {ctx.command}: {error}", exc_info=error)
+        # erreur inattendue = on log
+        logger.error(f"Erreur dans {ctx.command}: {error}", exc_info=error)
         await ctx.send(embed=error_embed(
             "Une erreur inattendue s'est produite. L'équipe a été notifiée.",
             "Erreur"
         ))
     
     async def close(self):
-        """Clean up when bot is shutting down"""
+        """fermeture propre"""
         await db.close()
         await super().close()
 
 
 async def main():
-    """Main entry point"""
     token = os.getenv("DISCORD_TOKEN")
     if not token:
-        logger.error("No DISCORD_TOKEN found in environment variables!")
+        logger.error("DISCORD_TOKEN manquant dans le .env !")
         return
     
     bot = DraftBot()

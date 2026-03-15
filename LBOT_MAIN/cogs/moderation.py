@@ -1,5 +1,7 @@
 """
-Moderation Cog - Ban, kick, mute, warn, automod, logging
+Cog Moderation - ban, kick, mute, warn, automod
+
+utilise moderation_repo pour config et cases
 """
 
 import discord
@@ -12,6 +14,7 @@ from typing import Optional
 from datetime import datetime, timedelta
 
 from utils.database import db
+from utils.repositories.moderation import moderation_repo
 from utils.helpers import (
     create_embed, success_embed, error_embed, info_embed, warning_embed,
     parse_duration, format_duration, format_datetime, ConfirmView, is_mod
@@ -19,33 +22,17 @@ from utils.helpers import (
 
 
 class Moderation(commands.Cog):
-    """Commandes de modération"""
+    """Commandes de moderation"""
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.spam_tracker: dict[tuple[int, int], list[float]] = {}  # (guild, user) -> [timestamps]
+        self.spam_tracker: dict[tuple[int, int], list[float]] = {}
     
     async def cog_load(self):
         self.check_temp_punishments.start()
     
     async def cog_unload(self):
         self.check_temp_punishments.cancel()
-    
-    async def get_config(self, guild_id: int) -> dict:
-        """Get moderation config"""
-        row = await db.fetchone(
-            "SELECT * FROM mod_config WHERE guild_id = ?", (guild_id,)
-        )
-        if row:
-            return dict(row)
-        
-        await db.execute(
-            "INSERT OR IGNORE INTO mod_config (guild_id) VALUES (?)", (guild_id,)
-        )
-        row = await db.fetchone(
-            "SELECT * FROM mod_config WHERE guild_id = ?", (guild_id,)
-        )
-        return dict(row)
     
     async def log_action(
         self,
@@ -56,26 +43,19 @@ class Moderation(commands.Cog):
         reason: str = None,
         duration: int = None
     ):
-        """Log a moderation action"""
-        # Save to database
-        await db.execute(
-            """INSERT INTO mod_cases (guild_id, user_id, moderator_id, action, reason, duration, created_at, expires_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                guild.id, user.id, moderator.id, action, reason, duration,
-                time.time(), time.time() + duration if duration else None
-            )
+        """log une action de moderation"""
+        # cree le case via le repo
+        case = await moderation_repo.create_case(
+            guild_id=guild.id,
+            user_id=user.id,
+            moderator_id=moderator.id,
+            action=action,
+            reason=reason or "",
+            duration=duration
         )
         
-        # Get case number
-        case = await db.fetchone(
-            "SELECT id FROM mod_cases WHERE guild_id = ? ORDER BY id DESC LIMIT 1",
-            (guild.id,)
-        )
-        case_num = case["id"] if case else 1
-        
-        # Send to log channel
-        config = await self.get_config(guild.id)
+        # envoie dans le channel de log
+        config = await moderation_repo.get_config(guild.id)
         log_channel_id = config.get("mod_log_channel_id")
         
         if log_channel_id:
@@ -91,7 +71,7 @@ class Moderation(commands.Cog):
                 }
                 
                 embed = create_embed(
-                    title=f"📋 Case #{case_num} | {action.upper()}",
+                    title=f"📋 Case #{case.id} | {action.upper()}",
                     color=color_map.get(action, discord.Color.blurple()),
                     fields=[
                         ("Membre", f"{user} ({user.id})", True),
@@ -108,25 +88,23 @@ class Moderation(commands.Cog):
                 except discord.Forbidden:
                     pass
         
-        return case_num
+        return case.id
     
     async def get_or_create_mute_role(self, guild: discord.Guild) -> discord.Role:
-        """Get or create the mute role"""
-        config = await self.get_config(guild.id)
+        """recupere ou cree le role mute"""
+        config = await moderation_repo.get_config(guild.id)
         
         if config.get("mute_role_id"):
             role = guild.get_role(config["mute_role_id"])
             if role:
                 return role
         
-        # Create mute role
         role = await guild.create_role(
             name="Muted",
             reason="Auto-created mute role",
             color=discord.Color.dark_gray()
         )
         
-        # Set permissions for all channels
         for channel in guild.channels:
             try:
                 await channel.set_permissions(
@@ -139,19 +117,50 @@ class Moderation(commands.Cog):
             except discord.Forbidden:
                 pass
         
-        await db.execute(
-            "UPDATE mod_config SET mute_role_id = ? WHERE guild_id = ?",
-            (role.id, guild.id)
-        )
-        
+        await moderation_repo.update_config(guild.id, mute_role_id=role.id)
         return role
     
     @tasks.loop(minutes=1)
     async def check_temp_punishments(self):
-        """Check and remove expired temporary punishments"""
+        """verifie les punitions temporaires expirees"""
+        # utilise le nouveau systeme de punitions temp
+        expired = await moderation_repo.get_expired_punishments()
+        
+        for punishment in expired:
+            guild = self.bot.get_guild(punishment.guild_id)
+            if not guild:
+                continue
+            
+            if punishment.action == "ban":
+                try:
+                    await guild.unban(
+                        discord.Object(id=punishment.user_id),
+                        reason="Temporary ban expired"
+                    )
+                except discord.NotFound:
+                    pass
+            
+            elif punishment.action == "mute":
+                member = guild.get_member(punishment.user_id)
+                if member:
+                    # timeout discord natif
+                    try:
+                        await member.timeout(None, reason="Mute expired")
+                    except discord.Forbidden:
+                        pass
+            
+            await moderation_repo.remove_temp_punishment(
+                punishment.guild_id, punishment.user_id, punishment.action
+            )
+        
+        # fallback: check les anciennes tables aussi (backward compat)
+        await self._check_legacy_temp_punishments()
+    
+    async def _check_legacy_temp_punishments(self):
+        """check les anciennes tables temp_bans et temp_mutes"""
         now = time.time()
         
-        # Check temp bans
+        # temp bans
         bans = await db.fetchall(
             "SELECT * FROM temp_bans WHERE expires_at <= ?", (now,)
         )
@@ -170,7 +179,7 @@ class Moderation(commands.Cog):
                 (ban["guild_id"], ban["user_id"])
             )
         
-        # Check temp mutes
+        # temp mutes
         mutes = await db.fetchall(
             "SELECT * FROM temp_mutes WHERE expires_at <= ?", (now,)
         )
@@ -179,7 +188,7 @@ class Moderation(commands.Cog):
             if guild:
                 member = guild.get_member(mute["user_id"])
                 if member:
-                    config = await self.get_config(guild.id)
+                    config = await moderation_repo.get_config(guild.id)
                     if config.get("mute_role_id"):
                         role = guild.get_role(config["mute_role_id"])
                         if role and role in member.roles:
@@ -200,40 +209,36 @@ class Moderation(commands.Cog):
     
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        """Automoderation listener"""
+        """automoderation"""
         if not message.guild or message.author.bot:
             return
         
         if message.author.guild_permissions.administrator:
             return
         
-        config = await self.get_config(message.guild.id)
+        # config cached par le repo
+        config = await moderation_repo.get_config(message.guild.id)
         
-        # Anti-spam
         if config.get("antispam_enabled"):
             await self.check_spam(message, config)
         
-        # Anti-invite
         if config.get("anti_invite_enabled"):
             await self.check_invites(message, config)
         
-        # Anti-links
         if config.get("anti_links_enabled"):
             await self.check_links(message, config)
         
-        # Bad words
         if config.get("bad_words_enabled"):
             await self.check_bad_words(message, config)
     
     async def check_spam(self, message: discord.Message, config: dict):
-        """Check for spam"""
+        """anti-spam"""
         key = (message.guild.id, message.author.id)
         now = time.time()
         
         if key not in self.spam_tracker:
             self.spam_tracker[key] = []
         
-        # Remove old timestamps
         window = config.get("antispam_seconds", 5)
         self.spam_tracker[key] = [t for t in self.spam_tracker[key] if now - t < window]
         self.spam_tracker[key].append(now)
@@ -251,9 +256,10 @@ class Moderation(commands.Cog):
                 role = await self.get_or_create_mute_role(message.guild)
                 await message.author.add_roles(role, reason="Anti-spam")
                 
-                await db.execute(
-                    "INSERT OR REPLACE INTO temp_mutes (guild_id, user_id, expires_at) VALUES (?, ?, ?)",
-                    (message.guild.id, message.author.id, time.time() + 300)  # 5 min mute
+                # utilise le nouveau systeme
+                await moderation_repo.add_temp_punishment(
+                    message.guild.id, message.author.id, "mute",
+                    time.time() + 300, role.id
                 )
                 
                 try:
@@ -267,7 +273,7 @@ class Moderation(commands.Cog):
             self.spam_tracker[key] = []
     
     async def check_invites(self, message: discord.Message, config: dict):
-        """Check for Discord invites"""
+        """anti-invites discord"""
         invite_pattern = r"(?:https?://)?(?:www\.)?(?:discord\.(?:gg|io|me|li)|discordapp\.com/invite)/[a-zA-Z0-9]+"
         
         if re.search(invite_pattern, message.content):
@@ -281,11 +287,14 @@ class Moderation(commands.Cog):
                 pass
     
     async def check_links(self, message: discord.Message, config: dict):
-        """Check for links"""
+        """anti-links"""
         link_pattern = r"https?://[^\s]+"
         
         if re.search(link_pattern, message.content):
-            allowed = json.loads(config.get("allowed_links", "[]"))
+            # allowed_links deja parse en list par le cache
+            allowed = config.get("allowed_links", [])
+            if isinstance(allowed, str):
+                allowed = json.loads(allowed)
             
             for link in re.findall(link_pattern, message.content):
                 if not any(allowed_domain in link for allowed_domain in allowed):
@@ -300,8 +309,12 @@ class Moderation(commands.Cog):
                     break
     
     async def check_bad_words(self, message: discord.Message, config: dict):
-        """Check for bad words"""
-        bad_words = json.loads(config.get("bad_words", "[]"))
+        """filtre de mots"""
+        # bad_words deja parse par le cache si configure
+        bad_words = config.get("bad_words", [])
+        if isinstance(bad_words, str):
+            bad_words = json.loads(bad_words)
+        
         content_lower = message.content.lower()
         
         for word in bad_words:
@@ -347,7 +360,7 @@ class Moderation(commands.Cog):
             if td:
                 duration_seconds = int(td.total_seconds())
         
-        # DM the user before banning
+        # DM avant ban
         try:
             dm_msg = f"Tu as été banni de **{ctx.guild.name}**"
             if reason:
@@ -361,9 +374,9 @@ class Moderation(commands.Cog):
         await member.ban(reason=f"{ctx.author}: {reason or 'Pas de raison'}")
         
         if duration_seconds:
-            await db.execute(
-                "INSERT OR REPLACE INTO temp_bans (guild_id, user_id, expires_at) VALUES (?, ?, ?)",
-                (ctx.guild.id, member.id, time.time() + duration_seconds)
+            await moderation_repo.add_temp_punishment(
+                ctx.guild.id, member.id, "ban",
+                time.time() + duration_seconds
             )
         
         case_num = await self.log_action(
@@ -385,10 +398,7 @@ class Moderation(commands.Cog):
             user = await self.bot.fetch_user(user_id)
             await ctx.guild.unban(user, reason=f"{ctx.author}: {reason or 'Pas de raison'}")
             
-            await db.execute(
-                "DELETE FROM temp_bans WHERE guild_id = ? AND user_id = ?",
-                (ctx.guild.id, user_id)
-            )
+            await moderation_repo.remove_temp_punishment(ctx.guild.id, user_id, "ban")
             
             case_num = await self.log_action(ctx.guild, "unban", user, ctx.author, reason)
             await ctx.send(embed=success_embed(f"**{user}** a été débanni ! (Case #{case_num})"))
@@ -407,7 +417,6 @@ class Moderation(commands.Cog):
         if member.top_role >= ctx.guild.me.top_role:
             return await ctx.send(embed=error_embed("Je ne peux pas expulser ce membre !"))
         
-        # DM the user
         try:
             dm_msg = f"Tu as été expulsé de **{ctx.guild.name}**"
             if reason:
@@ -469,10 +478,7 @@ class Moderation(commands.Cog):
         """Retire le mute d'un membre"""
         await member.timeout(None, reason=f"{ctx.author}: {reason or 'Pas de raison'}")
         
-        await db.execute(
-            "DELETE FROM temp_mutes WHERE guild_id = ? AND user_id = ?",
-            (ctx.guild.id, member.id)
-        )
+        await moderation_repo.remove_temp_punishment(ctx.guild.id, member.id, "mute")
         
         case_num = await self.log_action(ctx.guild, "unmute", member, ctx.author, reason)
         await ctx.send(embed=success_embed(f"**{member}** a été démute ! (Case #{case_num})"))
@@ -482,21 +488,18 @@ class Moderation(commands.Cog):
     @app_commands.describe(member="Le membre à avertir", reason="Raison de l'avertissement")
     async def warn(self, ctx: commands.Context, member: discord.Member, *, reason: str = None):
         """Donne un avertissement à un membre"""
-        await db.execute(
-            "INSERT INTO warnings (guild_id, user_id, moderator_id, reason, created_at) VALUES (?, ?, ?, ?, ?)",
-            (ctx.guild.id, member.id, ctx.author.id, reason, time.time())
+        # cree le case de warn
+        case = await moderation_repo.create_case(
+            ctx.guild.id, member.id, ctx.author.id, "warn", reason or ""
         )
         
-        # Count warnings
-        count = await db.fetchone(
-            "SELECT COUNT(*) as count FROM warnings WHERE guild_id = ? AND user_id = ?",
-            (ctx.guild.id, member.id)
-        )
-        warn_count = count["count"]
+        # compte les warns
+        warn_count = await moderation_repo.count_user_warns(ctx.guild.id, member.id)
         
+        # log
         case_num = await self.log_action(ctx.guild, "warn", member, ctx.author, reason)
         
-        # DM the user
+        # DM
         try:
             dm_msg = f"Tu as reçu un avertissement sur **{ctx.guild.name}**"
             if reason:
@@ -516,27 +519,26 @@ class Moderation(commands.Cog):
         """Affiche les avertissements d'un membre"""
         member = member or ctx.author
         
-        warns = await db.fetchall(
-            "SELECT * FROM warnings WHERE guild_id = ? AND user_id = ? ORDER BY created_at DESC",
-            (ctx.guild.id, member.id)
+        cases = await moderation_repo.get_user_cases(
+            ctx.guild.id, member.id, action="warn", active_only=True
         )
         
-        if not warns:
+        if not cases:
             return await ctx.send(embed=info_embed(f"{member.display_name} n'a aucun avertissement !"))
         
         description = ""
-        for i, warn in enumerate(warns[:10], 1):
-            mod = ctx.guild.get_member(warn["moderator_id"])
+        for i, case in enumerate(cases[:10], 1):
+            mod = ctx.guild.get_member(case.moderator_id)
             mod_name = mod.display_name if mod else "Modérateur inconnu"
-            reason = warn["reason"] or "Pas de raison"
-            date = format_datetime(warn["created_at"])
+            reason = case.reason or "Pas de raison"
+            date = format_datetime(case.created_at)
             description += f"**#{i}** - Par {mod_name} ({date})\n└ {reason}\n\n"
         
         embed = create_embed(
             title=f"⚠️ Avertissements de {member.display_name}",
             description=description,
             color=discord.Color.yellow(),
-            footer=f"Total: {len(warns)} avertissement(s)"
+            footer=f"Total: {len(cases)} avertissement(s)"
         )
         
         await ctx.send(embed=embed)
@@ -546,11 +548,10 @@ class Moderation(commands.Cog):
     @app_commands.describe(member="Le membre dont tu veux supprimer les avertissements")
     async def clearwarns(self, ctx: commands.Context, member: discord.Member):
         """Supprime tous les avertissements d'un membre"""
-        await db.execute(
-            "DELETE FROM warnings WHERE guild_id = ? AND user_id = ?",
-            (ctx.guild.id, member.id)
-        )
-        await ctx.send(embed=success_embed(f"Avertissements de {member.mention} supprimés !"))
+        count = await moderation_repo.clear_user_warns(ctx.guild.id, member.id)
+        await ctx.send(embed=success_embed(
+            f"{count} avertissement(s) de {member.mention} supprimé(s) !"
+        ))
     
     @commands.hybrid_command(name="clear", aliases=["purge", "clean"])
     @commands.has_permissions(manage_messages=True)
@@ -561,7 +562,6 @@ class Moderation(commands.Cog):
         if amount < 1 or amount > 100:
             return await ctx.send(embed=error_embed("Le nombre doit être entre 1 et 100 !"))
         
-        # Delete the command message first
         try:
             await ctx.message.delete()
         except discord.NotFound:
@@ -618,7 +618,7 @@ class Moderation(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def modlog(self, ctx: commands.Context):
         """Configure les logs de modération"""
-        config = await self.get_config(ctx.guild.id)
+        config = await moderation_repo.get_config(ctx.guild.id)
         channel = ctx.guild.get_channel(config.get("mod_log_channel_id"))
         
         embed = create_embed(
@@ -635,20 +635,14 @@ class Moderation(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def modlog_channel(self, ctx: commands.Context, channel: discord.TextChannel):
         """Définit le salon des logs de modération"""
-        await db.execute(
-            "UPDATE mod_config SET mod_log_channel_id = ? WHERE guild_id = ?",
-            (channel.id, ctx.guild.id)
-        )
+        await moderation_repo.update_config(ctx.guild.id, mod_log_channel_id=channel.id)
         await ctx.send(embed=success_embed(f"Logs de modération envoyés dans {channel.mention} !"))
     
     @modlog.command(name="disable")
     @commands.has_permissions(administrator=True)
     async def modlog_disable(self, ctx: commands.Context):
         """Désactive les logs de modération"""
-        await db.execute(
-            "UPDATE mod_config SET mod_log_channel_id = NULL WHERE guild_id = ?",
-            (ctx.guild.id,)
-        )
+        await moderation_repo.update_config(ctx.guild.id, mod_log_channel_id=None)
         await ctx.send(embed=success_embed("Logs de modération désactivés !"))
 
 

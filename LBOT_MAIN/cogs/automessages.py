@@ -1,11 +1,10 @@
 """
-AutoMessages Cog - Messages récurrents automatiques
+Cog AutoMessages - messages recurrents automatiques
 
-Features:
-- Messages programmés récurrents (intervalle personnalisable)
-- Rappels de bump (Disboard, top.gg, etc.)
-- Messages d'annonce planifiés
-- Support des embeds personnalisés
+- messages programmes (intervalle custom)
+- rappels de bump (disboard, top.gg)
+- annonces planifiees
+- support embeds
 """
 
 import discord
